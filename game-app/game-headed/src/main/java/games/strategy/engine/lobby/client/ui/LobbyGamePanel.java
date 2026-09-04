@@ -29,6 +29,7 @@ import javax.swing.UIManager;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableRowSorter;
+import org.triplea.lobby.common.GameDescription;
 import org.triplea.swing.MouseListenerBuilder;
 import org.triplea.swing.SwingAction;
 
@@ -246,6 +247,16 @@ class LobbyGamePanel extends JPanel {
     }
     // we sort the table, so get the correct index
     final var description = gameTableModel.get(gameTable.convertRowIndexToModel(selectedIndex));
+    if (description.getStatus() == GameDescription.GameStatus.LAUNCHING) {
+      // GameProcess.joinGame silently no-ops on a launching game; tell the user why so they
+      // don't re-click into a dead action believing the click missed.
+      JOptionPane.showMessageDialog(
+          JOptionPane.getFrameForComponent(this),
+          "This game is still starting up. Try joining again in a moment.",
+          "Game Starting",
+          JOptionPane.INFORMATION_MESSAGE);
+      return;
+    }
     GameProcess.joinGame(description, loginResult.getUsername());
   }
 
