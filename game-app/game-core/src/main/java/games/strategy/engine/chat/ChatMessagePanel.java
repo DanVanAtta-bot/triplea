@@ -173,7 +173,6 @@ public class ChatMessagePanel extends JPanel implements ChatMessageListener {
     nextMessage = new JTextField(10);
     // when enter is pressed, send the message
     setStatus = new JButton(setStatusAction);
-    setStatus.setFocusable(false);
     final Insets inset = new Insets(3, 3, 3, 3);
     send = new JButton(SwingAction.of("Send", e -> sendMessage()));
     send.setMargin(inset);
