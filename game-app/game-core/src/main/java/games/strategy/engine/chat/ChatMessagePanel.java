@@ -60,7 +60,7 @@ public class ChatMessagePanel extends JPanel implements ChatMessageListener {
   private final SimpleAttributeSet normal = new SimpleAttributeSet();
   private final Action setStatusAction =
       SwingAction.of(
-          "Status...",
+          "Set Status Message...",
           e -> {
             final String status =
                 JOptionPane.showInputDialog(
