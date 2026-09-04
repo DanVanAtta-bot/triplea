@@ -96,10 +96,13 @@ class LobbyGameTableModel extends AbstractTableModel {
       case Players -> lobbyGame.getPlayerCount();
       case P -> (lobbyGame.getPassworded() ? "*" : "");
       case Status ->
-          // Note, we update status client side to avoid a headless game from reporting
-          // a new status when players leave or join. We expect a player count of 0 in
-          // headless games if there are no players connected.
-          lobbyGame.getPlayerCount() == 0 ? "Available" : lobbyGame.getStatus();
+          // We derive status client side so a headless game doesn't report a new status as
+          // players leave or join; a connected-player count of 0 is normal for headless games.
+          // Only override to "Available" before the game has started (round 0) so a bot game
+          // already in progress keeps its real status instead of looking joinable-and-empty.
+          (lobbyGame.getPlayerCount() == 0 && lobbyGame.getGameRound() == 0)
+              ? "Available"
+              : lobbyGame.getStatus();
       case Comments -> lobbyGame.getComments();
       case Started -> new StartTime(lobbyGame.getEpochMilliTimeStarted());
       case UUID -> listingModel.getGameIdForRow(rowIndex);
