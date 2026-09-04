@@ -330,7 +330,7 @@ class LobbyGamePanel extends JPanel {
         JOptionPane.showConfirmDialog(
             null,
             "Shut down the selected game? It will close for all players in it.",
-            "Shut Down Game?",
+            "Shut Down Game",
             JOptionPane.OK_CANCEL_OPTION);
     if (result != JOptionPane.OK_OPTION) {
       return;
