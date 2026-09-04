@@ -76,6 +76,28 @@ class LobbyGamePanel extends JPanel {
             }
             return component;
           }
+
+          @Override
+          // The Host, Name and Comments columns truncate with an ellipsis; show the full text on
+          // hover so two similarly-named games remain distinguishable.
+          public String getToolTipText(final MouseEvent event) {
+            final int viewRow = rowAtPoint(event.getPoint());
+            final int viewColumn = columnAtPoint(event.getPoint());
+            if (viewRow < 0 || viewColumn < 0) {
+              return null;
+            }
+            final int modelColumn = convertColumnIndexToModel(viewColumn);
+            if (modelColumn == lobbyGameTableModel.getColumnIndex(LobbyGameTableModel.Column.Host)
+                || modelColumn
+                    == lobbyGameTableModel.getColumnIndex(LobbyGameTableModel.Column.Name)
+                || modelColumn
+                    == lobbyGameTableModel.getColumnIndex(LobbyGameTableModel.Column.Comments)) {
+              final Object value = getValueAt(viewRow, viewColumn);
+              final String text = value == null ? "" : value.toString();
+              return text.isEmpty() ? null : text;
+            }
+            return null;
+          }
         };
     gameTable.setRowHeight(28);
     gameTable.setShowGrid(false);
