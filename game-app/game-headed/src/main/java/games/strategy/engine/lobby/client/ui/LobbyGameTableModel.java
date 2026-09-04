@@ -63,6 +63,13 @@ class LobbyGameTableModel extends AbstractTableModel {
   }
 
   @Override
+  public Class<?> getColumnClass(final int columnIndex) {
+    // The Started column carries a Comparable sort key so header-click sorting is chronological
+    // rather than a lexicographic compare of the formatted time strings.
+    return Column.values()[columnIndex] == Column.Started ? StartTime.class : Object.class;
+  }
+
+  @Override
   public int getColumnCount() {
     final int adminHiddenColumns = admin ? 0 : -1;
     // -1 so we don't display the UUID
@@ -94,7 +101,7 @@ class LobbyGameTableModel extends AbstractTableModel {
           // headless games if there are no players connected.
           lobbyGame.getPlayerCount() == 0 ? "Available" : lobbyGame.getStatus();
       case Comments -> lobbyGame.getComments();
-      case Started -> formatBotStartTime(lobbyGame.getEpochMilliTimeStarted());
+      case Started -> new StartTime(lobbyGame.getEpochMilliTimeStarted());
       case UUID -> listingModel.getGameIdForRow(rowIndex);
       default -> throw new IllegalStateException("Unknown column: " + column);
     };
@@ -107,5 +114,18 @@ class LobbyGameTableModel extends AbstractTableModel {
         .appendLocalized(null, FormatStyle.SHORT)
         .toFormatter()
         .format(LocalDateTime.ofInstant(instant, ZoneOffset.systemDefault()));
+  }
+
+  /** Started-column value that renders as a localized time but sorts chronologically. */
+  record StartTime(long epochMilli) implements Comparable<StartTime> {
+    @Override
+    public int compareTo(final StartTime other) {
+      return Long.compare(epochMilli, other.epochMilli);
+    }
+
+    @Override
+    public String toString() {
+      return formatBotStartTime(epochMilli);
+    }
   }
 }
