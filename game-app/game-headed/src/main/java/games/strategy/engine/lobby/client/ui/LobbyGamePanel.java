@@ -308,7 +308,7 @@ class LobbyGamePanel extends JPanel {
     final int result =
         JOptionPane.showConfirmDialog(
             null,
-            "Are you sure you want to disconnect the selected game?",
+            "Remove the selected game's listing? The game keeps running.",
             "Remove Game From Lobby",
             JOptionPane.OK_CANCEL_OPTION);
     if (result != JOptionPane.OK_OPTION) {
@@ -318,8 +318,7 @@ class LobbyGamePanel extends JPanel {
     final String gameId =
         gameTableModel.getGameIdForRow(gameTable.convertRowIndexToModel(selectedIndex));
     gameListingModel.bootGame(gameId);
-    JOptionPane.showMessageDialog(
-        null, "The game you selected has been disconnected from the lobby.");
+    JOptionPane.showMessageDialog(null, "The selected game has been removed from the lobby.");
   }
 
   private void shutdownGame() {
@@ -330,8 +329,8 @@ class LobbyGamePanel extends JPanel {
     final int result =
         JOptionPane.showConfirmDialog(
             null,
-            "Are you sure you want to shutdown the selected game?",
-            "Send Shutdown Signal?",
+            "Shut down the selected game? It will close for all players in it.",
+            "Shut Down Game?",
             JOptionPane.OK_CANCEL_OPTION);
     if (result != JOptionPane.OK_OPTION) {
       return;
@@ -340,6 +339,6 @@ class LobbyGamePanel extends JPanel {
     final String gameId =
         gameTableModel.getGameIdForRow(gameTable.convertRowIndexToModel(selectedIndex));
     gameListingModel.sendShutdownRequest(gameId);
-    JOptionPane.showMessageDialog(parent, "The game you selected was sent a shutdown signal");
+    JOptionPane.showMessageDialog(parent, "The selected game will shut down shortly.");
   }
 }
