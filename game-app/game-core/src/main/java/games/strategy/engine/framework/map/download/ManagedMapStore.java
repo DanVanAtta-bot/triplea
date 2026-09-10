@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.triplea.http.client.lobby.maps.listing.MapDownloadItem;
 
 enum StoreState {
@@ -32,6 +33,7 @@ interface MapStatusListener {
 }
 
 /// Central data model part to store for map information
+@Slf4j
 final class ManagedMapStore implements DownloadListener {
 
   private final Map<String, ManagedMap> mapsByName = new HashMap<>(); // lower-case map name index
@@ -47,6 +49,13 @@ final class ManagedMapStore implements DownloadListener {
   ManagedMapStore() {
     storeState = StoreState.UNINITIALIZED;
     DownloadCoordinator.instance.addDownloadListener(this);
+  }
+
+  /// Detaches this store from the process-wide {@link DownloadCoordinator}. The coordinator is a
+  /// singleton that outlives any one download window, so a store that is not removed keeps
+  /// receiving broadcasts for every future download; call this when the owning window is disposed.
+  void dispose() {
+    DownloadCoordinator.instance.removeDownloadListener(this);
   }
 
   public void initialize(
@@ -146,7 +155,12 @@ final class ManagedMapStore implements DownloadListener {
   public void downloadComplete(MapDownloadItem download) {
     final ManagedMap managedMap = getMapByMapDownloadItem(download);
     if (managedMap == null) {
-      throw new IllegalStateException("No managed map found for MapDownloadItem: " + download);
+      // A completed download can be absent from this store when the store was built from a
+      // degraded map listing (eg: MapListingFetcher returned an empty list after a fetch
+      // failure). The map is already extracted to disk by the time this fires, so there is
+      // nothing to correct here beyond flagging that the store's view is out of sync.
+      log.warn("Completed download not present in map listing, ignoring: {}", download);
+      return;
     }
     SwingUtilities.invokeLater(() -> updateStatus(List.of(managedMap), ManagedMapStatus.INSTALLED));
   }

@@ -314,6 +314,14 @@ public class DownloadMapsWindow extends JFrame {
     return downloadMapsWindowModel.getMapStore();
   }
 
+  /// Detaches this window's store from the {@link DownloadCoordinator} singleton so it does not
+  /// outlive the window; without this a new store leaks on every open (window is DISPOSE_ON_CLOSE).
+  @Override
+  public void dispose() {
+    getMapStore().dispose();
+    super.dispose();
+  }
+
   private void updateTabTitles() {
     updateTabTitleNewMaps();
     updateTabTitleUpdatesAvailable();
