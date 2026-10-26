@@ -268,7 +268,8 @@ final class GameRecorder {
     if (stepKind.equals("combat_move")) {
       ownersBeforeCombatMove = new HashMap<>(owners);
     }
-    if (stepPlayer != null) {
+    // Bid steps come round every round but only run in round 1; they aren't the player's turn.
+    if (stepPlayer != null && !step.hasReachedMaxRunCount()) {
       openCaptures.values().removeIf(c -> c.by().equals(stepPlayer) && c.round() < stepRound);
     }
     if (delegate instanceof PurchaseDelegate
