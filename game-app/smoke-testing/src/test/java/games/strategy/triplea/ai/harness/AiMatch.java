@@ -46,11 +46,12 @@ import javax.annotation.Nullable;
  * [--bid <file.bid.json>] [--swap] [--out <dir>] [--odds-runs <n>] [--flag-combat <tuv>]
  * [--flag-odds <0..1>] [--scripts <player:round:file.json,...>]}. {@code --scripts} plays that
  * player's turn of that round from a kata script (see {@link KataScript}; phases the script leaves
- * out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a second game with the patched set given to the other
- * alliance (two-alliance maps only). {@code --bid} applies a fixed bid before round 1, see {@link
- * FixedBid}. {@code --props} overrides game options by their exact XML name; Tech Development is
- * always forced off. Every game writes {@code <out>/<game id>/} with {@code game.json}, {@code
- * records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
+ * out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a second game
+ * with the patched set given to the other alliance (two-alliance maps only). {@code --bid} applies
+ * a fixed bid before round 1, see {@link FixedBid}. {@code --props} overrides game options by their
+ * exact XML name; Tech Development is always forced off. Every game writes {@code <out>/<game id>/}
+ * with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds; see {@link
+ * GameRecorder}.
  *
  * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
  * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
@@ -215,7 +216,10 @@ public final class AiMatch {
     System.out.println("RECORDS " + recorder.dir());
     if (!scripted.keySet().equals(scripts.keySet())) {
       throw new IllegalArgumentException(
-          "--scripts names unknown players: " + scripts.keySet() + ", map has " + scripted.keySet());
+          "--scripts names unknown players: "
+              + scripts.keySet()
+              + ", map has "
+              + scripted.keySet());
     }
     while (!game.isGameOver() && !recorder.isOver() && data.getSequence().getRound() <= roundCap) {
       final int round = data.getSequence().getRound();
