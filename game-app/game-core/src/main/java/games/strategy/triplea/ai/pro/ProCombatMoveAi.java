@@ -33,6 +33,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -92,6 +93,7 @@ public class ProCombatMoveAi {
     determineTerritoriesThatCanBeHeld(attackOptions, clearedTerritories);
     prioritizeAttackOptions(player, attackOptions);
     removeTerritoriesThatArentWorthAttacking(attackOptions);
+    final List<ProTerritory> consideredAttacks = List.copyOf(attackOptions);
 
     // Determine which territories to attack
     determineTerritoriesToAttack(attackOptions);
@@ -132,6 +134,8 @@ public class ProCombatMoveAi {
     // Check if any subs in contested territory that's not being attacked
     checkContestedSeaTerritories();
 
+    reportCombatMovePlan(consideredAttacks);
+
     // Calculate attack routes and perform moves
     doMove(territoryManager.getAttackOptions().getTerritoryMap(), moveDel, data, player);
 
@@ -147,6 +151,46 @@ public class ProCombatMoveAi {
         territoryManager.getAttackOptions().getTerritoryMap();
     territoryManager = null;
     return result;
+  }
+
+  /** Hands the planned attacks to the measurement listener, if any. Reads only; decides nothing. */
+  private void reportCombatMovePlan(final List<ProTerritory> consideredAttacks) {
+    final ProDecisionListener listener = ai.getDecisionListener();
+    if (listener == null) {
+      return;
+    }
+    try {
+      final Map<Territory, ProTerritory> attackMap =
+          territoryManager.getAttackOptions().getTerritoryMap();
+      final Set<ProTerritory> reported = new LinkedHashSet<>(consideredAttacks);
+      for (final ProTerritory patd : attackMap.values()) {
+        if (!patd.getUnits().isEmpty() || !patd.getBombers().isEmpty()) {
+          reported.add(patd);
+        }
+      }
+      final List<ProDecisionListener.AttackDecision> decisions = new ArrayList<>();
+      for (final ProTerritory patd : reported) {
+        final ProBattleResult result = patd.getBattleResult();
+        final ProBattleResult max = patd.getMaxBattleResult();
+        decisions.add(
+            new ProDecisionListener.AttackDecision(
+                patd.getTerritory().getName(),
+                !patd.getUnits().isEmpty() || !patd.getBombers().isEmpty(),
+                patd.getUnits().size(),
+                patd.getBombers().size(),
+                patd.isStrafing(),
+                result == null ? null : result.getWinPercentage(),
+                result == null ? null : result.getTuvSwing(),
+                result == null ? null : result.isHasLandUnitRemaining(),
+                max == null ? null : max.getWinPercentage(),
+                patd.isCanHold(),
+                patd.getValue()));
+      }
+      listener.combatMovePlanned(
+          player, data.getSequence().getRound(), data != ai.getGameData(), decisions);
+    } catch (final RuntimeException e) {
+      ProLogger.warn("Decision listener failed: " + e);
+    }
   }
 
   void doMove(

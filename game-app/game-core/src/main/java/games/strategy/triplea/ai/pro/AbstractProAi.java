@@ -47,7 +47,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import javax.annotation.Nullable;
 import lombok.Getter;
+import lombok.Setter;
 import org.triplea.java.collections.CollectionUtils;
 import org.triplea.util.Tuple;
 
@@ -71,6 +73,9 @@ public abstract class AbstractProAi extends AbstractAi {
   private Map<Territory, ProPurchaseTerritory> storedPurchaseTerritories;
   private List<PoliticalActionAttachment> storedPoliticalActions;
   private List<Territory> storedStrafingTerritories;
+
+  // Measurement only; never consulted by decision logic.
+  @Getter @Setter @Nullable private ProDecisionListener decisionListener;
 
   public AbstractProAi(
       final String name,
