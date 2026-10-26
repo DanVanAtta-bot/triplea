@@ -12,6 +12,7 @@ dependencies {
     testImplementation(project(":java-extras"))
     testImplementation(project(":swing-lib"))
     testImplementation(project(":test-common"))
+    testImplementation(libs.gson)
 }
 
 tasks.named<Test>("test") {
@@ -49,12 +50,15 @@ tasks.named<ProcessResources>("processTestResources") {
 }
 
 // AI-improvement harness: plays patched-vs-baseline Hard AI games.
-// ./gradlew :smoke-testing:aiMatch --args="--map big_world_1942.xml --patched Axis --patches NO_OP --rounds 30 --swap"
+// ./gradlew :smoke-testing:aiMatch --args="--map big_world_1942.xml --patched Axis --patches NO_OP --rounds 30 --swap --out /some/dir"
 tasks.register<JavaExec>("aiMatch") {
     group = "application"
     description = "Plays headless Hard AI games, one alliance patched, the rest baseline."
     classpath = sourceSets["test"].runtimeClasspath
     mainClass.set("games.strategy.triplea.ai.harness.AiMatch")
     workingDir = projectDir
-    maxHeapSize = "3G"
+    maxHeapSize = "4G"
+    // Both battle calculators (ProAI's and the recorder's) size their worker pools from the CPU
+    // count; cap it so parallel games don't swamp the box. -PaiMatchCpus=N to change.
+    jvmArgs("-XX:ActiveProcessorCount=" + (project.findProperty("aiMatchCpus") ?: "4"))
 }

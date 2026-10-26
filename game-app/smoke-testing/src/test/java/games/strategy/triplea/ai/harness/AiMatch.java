@@ -14,15 +14,21 @@ import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.EndRoundDelegate;
 import games.strategy.triplea.settings.ClientSetting;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -30,8 +36,10 @@ import java.util.stream.Collectors;
  * runs the unmodified one. Prints one RESULT line per game.
  *
  * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> --rounds <cap> [--calc
- * bounded|concurrent] [--swap]}. {@code --swap} plays a second game with the patched set given to
- * the other alliance (two-alliance maps only).
+ * bounded|concurrent] [--swap] [--out <dir>] [--odds-runs <n>] [--flag-combat <tuv>] [--flag-odds
+ * <0..1>]}. {@code --swap} plays a second game with the patched set given to the other alliance
+ * (two-alliance maps only). Every game writes {@code <out>/<game id>/} with {@code game.json},
+ * {@code records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
  */
 public final class AiMatch {
 
@@ -48,6 +56,25 @@ public final class AiMatch {
     if (!List.of("bounded", "concurrent").contains(calc)) {
       throw new IllegalArgumentException("--calc must be bounded or concurrent: " + calc);
     }
+    final Path outRoot = Path.of(opts.getOrDefault("out", "build/ai-measure")).toAbsolutePath();
+    final GameRecorder.Options recorderOptions =
+        new GameRecorder.Options(
+            Integer.parseInt(opts.getOrDefault("odds-runs", "500")),
+            Integer.parseInt(opts.getOrDefault("flag-combat", "50")),
+            Double.parseDouble(opts.getOrDefault("flag-odds", "0.6")));
+    final Map<String, Object> runConfig = new LinkedHashMap<>();
+    runConfig.put("map", map);
+    runConfig.put("round_cap", roundCap);
+    runConfig.put("calc", calc);
+    runConfig.put("harness_odds_calc", "concurrent");
+    runConfig.put("patches", patches.stream().map(Enum::name).sorted().toList());
+    runConfig.put("tech_development", false);
+    runConfig.put("dice_seed", null);
+    runConfig.put("ai_seed", null);
+    runConfig.put("engine_commit", git("rev-parse", "HEAD"));
+    runConfig.put("engine_dirty", !git("status", "--porcelain", "--untracked-files=no").isEmpty());
+    runConfig.put("java", System.getProperty("java.version"));
+    runConfig.put("cpus", Runtime.getRuntime().availableProcessors());
     GameTestUtils.setUp();
     // ProAi resolves its static calculator once per JVM, on first use, from this setting.
     ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
@@ -57,7 +84,7 @@ public final class AiMatch {
       orientations.add(otherAlliance(map, patchedAlliance));
     }
     for (final String alliance : orientations) {
-      playOne(map, roundCap, patches, alliance);
+      playOne(map, roundCap, patches, alliance, outRoot, recorderOptions, runConfig);
     }
     // Game threads (battle calculator workers etc.) are not all daemons.
     System.exit(0);
@@ -67,10 +94,14 @@ public final class AiMatch {
       final String map,
       final int roundCap,
       final Set<ProAiPatch> patches,
-      final String patchedAlliance) {
+      final String patchedAlliance,
+      final Path outRoot,
+      final GameRecorder.Options recorderOptions,
+      final Map<String, Object> runConfig) {
     final List<ProAi> ais = new ArrayList<>();
-    final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais);
-    final PlayerTypes.Type baseline = proAiType("Hard AI (baseline)", Set.of(), ais);
+    final DecisionLog decisionLog = new DecisionLog();
+    final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais, decisionLog);
+    final PlayerTypes.Type baseline = proAiType("Hard AI (baseline)", Set.of(), ais, decisionLog);
     final long start = System.nanoTime();
     final ServerGame game =
         GameTestUtils.setUpGameWithAis(
@@ -82,8 +113,31 @@ public final class AiMatch {
             player -> allianceOf(player).equals(patchedAlliance) ? patched : baseline);
     game.setStopGameOnDelegateExecutionStop(true);
     final GameData data = game.getData();
+    final Map<String, String> variantBySide = new LinkedHashMap<>();
+    final Map<String, List<String>> patchesBySide = new LinkedHashMap<>();
+    for (final GamePlayer player : data.getPlayerList().getPlayers()) {
+      final String side = allianceOf(player);
+      final boolean isPatched = side.equals(patchedAlliance) && !patches.isEmpty();
+      variantBySide.put(side, isPatched ? "patched" : "baseline");
+      patchesBySide.put(
+          side, isPatched ? patches.stream().map(Enum::name).sorted().toList() : List.of());
+    }
+    final Map<String, Object> config = new LinkedHashMap<>(runConfig);
+    config.put("patched_alliance", patchedAlliance);
+    config.put("patches_by_side", patchesBySide);
+    config.put("started_at", Instant.now().toString());
+    final String gameId =
+        DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now())
+            + "-"
+            + UUID.randomUUID().toString().substring(0, 6);
+    final GameRecorder recorder =
+        new GameRecorder(
+            game, outRoot, gameId, recorderOptions, decisionLog, variantBySide, config);
+    System.out.println("RECORDS " + recorder.dir());
     while (!game.isGameOver() && data.getSequence().getRound() <= roundCap) {
+      recorder.beforeStep();
       game.runNextStep();
+      recorder.afterStep();
     }
     final double seconds = (System.nanoTime() - start) / 1e9;
     final boolean over = game.isGameOver();
@@ -91,6 +145,15 @@ public final class AiMatch {
         over ? ((EndRoundDelegate) data.getEndRoundDelegate()).getWinners() : List.of();
     final String winnerAlliance =
         winners.stream().map(AiMatch::allianceOf).distinct().collect(Collectors.joining("+"));
+    final Map<String, Object> result = new LinkedHashMap<>();
+    result.put("winner", winners.isEmpty() ? null : winnerAlliance);
+    result.put("winners", winners.stream().map(GamePlayer::getName).sorted().toList());
+    result.put("rounds", over ? data.getSequence().getRound() : data.getSequence().getRound() - 1);
+    result.put("capped", !over);
+    result.put("seconds", Math.round(seconds * 10) / 10.0);
+    result.put("victory_cities", victoryCities(data));
+    result.put("patch_hits", patchHits(ais));
+    recorder.finish(result);
     System.out.printf(
         "RESULT map=%s patched=%s patches=%s winner=%s winners=%s rounds=%d capped=%s"
             + " seconds=%.1f victoryCities=%s patchHits=%s%n",
@@ -111,11 +174,15 @@ public final class AiMatch {
   }
 
   private static PlayerTypes.Type proAiType(
-      final String label, final Set<ProAiPatch> patches, final List<ProAi> created) {
+      final String label,
+      final Set<ProAiPatch> patches,
+      final List<ProAi> created,
+      final DecisionLog decisionLog) {
     return new PlayerTypes.Type(label, false) {
       @Override
       public Player newPlayerWithName(final String name) {
         final ProAi ai = new ProAi(name, getLabel(), patches);
+        ai.setDecisionListener(decisionLog);
         created.add(ai);
         return ai;
       }
@@ -144,9 +211,22 @@ public final class AiMatch {
   }
 
   private static String allianceOf(final GamePlayer player) {
-    final Collection<String> alliances =
-        player.getData().getAllianceTracker().getAlliancesPlayerIsIn(player);
-    return alliances.isEmpty() ? player.getName() : String.join("+", alliances);
+    return GameRecorder.sideOf(player);
+  }
+
+  private static String git(final String... args) {
+    final List<String> command = new ArrayList<>(List.of("git"));
+    command.addAll(List.of(args));
+    try {
+      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      final String output = new String(process.getInputStream().readAllBytes()).trim();
+      return process.waitFor() == 0 ? output : "unknown";
+    } catch (final IOException e) {
+      return "unknown";
+    } catch (final InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return "unknown";
+    }
   }
 
   private static void requireAlliance(final GameData data, final String alliance) {
