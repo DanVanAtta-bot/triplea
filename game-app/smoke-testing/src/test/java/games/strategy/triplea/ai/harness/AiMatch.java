@@ -503,6 +503,9 @@ public final class AiMatch {
   @SuppressWarnings("unchecked")
   public static void setProperty(final GameData data, final String name, final String value) {
     final Object current = data.getProperties().get(name);
+    if (current == null && name.equals(Constants.TECH_DEVELOPMENT) && "false".equals(value)) {
+      return; // a map without the option already has tech off (engine default)
+    }
     if (current == null) {
       throw new IllegalArgumentException("No game option named '" + name + "'");
     }
