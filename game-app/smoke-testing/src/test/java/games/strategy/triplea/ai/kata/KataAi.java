@@ -93,8 +93,13 @@ public final class KataAi extends ProAi {
     final IntegerMap<ProductionRule> rules = new IntegerMap<>();
     script.purchase.forEach((unit, count) -> rules.add(ruleFor(player, unit), count));
     source = "[script] ";
-    recording.purchase(rules);
+    final String error = recording.purchase(rules);
     source = "";
+    if (error != null) {
+      // Unaffordable script (eg lower income than planned for): the AI buys instead.
+      super.purchase(false, pusToSpend, recording, data, player);
+      return;
+    }
     // The AI's stored plans assumed its own purchase; let it re-plan moves and placement.
     discardStoredMovePlans();
     discardStoredPurchasePlan();
