@@ -6,6 +6,7 @@ import games.strategy.engine.data.GameState;
 import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.Unit;
 import games.strategy.triplea.Properties;
+import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.ai.pro.data.ProBattleResult;
 import games.strategy.triplea.ai.pro.data.ProTerritory;
@@ -20,6 +21,9 @@ import org.triplea.java.collections.CollectionUtils;
 
 /** Pro AI odds calculator. */
 public class ProOddsCalculator {
+  // The precision stock already gives the smallest battles (~4 points of win% noise at a 75%
+  // cutoff). 200 roughly doubled the AI's turn time; 100 added ~5-13%.
+  private static final int ODDS_MORE_RUNS_FLOOR = 100;
 
   private final IBattleCalculator calc;
   private boolean stopped = false;
@@ -242,7 +246,12 @@ public class ProOddsCalculator {
     }
 
     final int minArmySize = Math.min(attackingUnits.size(), defendingUnits.size());
-    final int runCount = Math.max(16, 100 - minArmySize);
+    final int runCount;
+    if (proData.isPatchOn(ProAiPatch.ODDS_MORE_RUNS)) {
+      runCount = Math.max(ODDS_MORE_RUNS_FLOOR, 100 - minArmySize);
+    } else {
+      runCount = Math.max(16, 100 - minArmySize);
+    }
     final GamePlayer attacker = CollectionUtils.getAny(attackingUnits).getOwner();
     final GamePlayer defender = CollectionUtils.getAny(defendingUnits).getOwner();
     final AggregateResults results =
