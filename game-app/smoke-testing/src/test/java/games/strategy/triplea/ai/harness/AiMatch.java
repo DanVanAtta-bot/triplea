@@ -31,18 +31,21 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 /**
- * Plays headless all-Hard-AI games where one alliance runs a patched Hard AI and every other player
- * runs the unmodified one. Prints one RESULT line per game.
+ * Plays headless all-Hard-AI games where one alliance runs the {@code --patches} set and every
+ * other player runs the {@code --baseline-patches} set (default none: stock Hard AI). Prints one
+ * RESULT line per game.
  *
- * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> --rounds <cap> [--calc
- * bounded|concurrent] [--props "Name=value,Name2=value"] [--swap] [--out <dir>] [--odds-runs <n>]
- * [--flag-combat <tuv>] [--flag-odds <0..1>]}. {@code --swap} plays a second game with the patched
- * set given to the other alliance (two-alliance maps only). {@code --props} overrides game options
- * by their exact XML name; Tech Development is always forced off. Every game writes {@code
- * <out>/<game id>/} with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds;
- * see {@link GameRecorder}.
+ * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> [--baseline-patches
+ * <P1,P2|none>] --rounds <cap> [--calc bounded|concurrent] [--props "Name=value,Name2=value"]
+ * [--bid <file.bid.json>] [--swap] [--out <dir>] [--odds-runs <n>] [--flag-combat <tuv>]
+ * [--flag-odds <0..1>]}. {@code --swap} plays a second game with the patched set given to the other
+ * alliance (two-alliance maps only). {@code --bid} applies a fixed bid before round 1, see {@link
+ * FixedBid}. {@code --props} overrides game options by their exact XML name; Tech Development is
+ * always forced off. Every game writes {@code <out>/<game id>/} with {@code game.json}, {@code
+ * records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
  */
 public final class AiMatch {
 
@@ -53,6 +56,9 @@ public final class AiMatch {
     final String map = opts.getOrDefault("map", "big_world_1942.xml");
     final int roundCap = Integer.parseInt(opts.getOrDefault("rounds", "30"));
     final Set<ProAiPatch> patches = parsePatches(opts.getOrDefault("patches", "NO_OP"));
+    final Set<ProAiPatch> baselinePatches =
+        parsePatches(opts.getOrDefault("baseline-patches", "none"));
+    final FixedBid bid = opts.containsKey("bid") ? FixedBid.load(Path.of(opts.get("bid"))) : null;
     final String patchedAlliance = opts.getOrDefault("patched", "Axis");
     final Map<String, String> props = parseProps(opts.getOrDefault("props", ""));
     props.put(Constants.TECH_DEVELOPMENT, "false");
@@ -73,6 +79,7 @@ public final class AiMatch {
     runConfig.put("calc", calc);
     runConfig.put("harness_odds_calc", "concurrent");
     runConfig.put("patches", patches.stream().map(Enum::name).sorted().toList());
+    runConfig.put("baseline_patches", baselinePatches.stream().map(Enum::name).sorted().toList());
     runConfig.put("tech_development", false);
     runConfig.put("props", props);
     runConfig.put("dice_seed", null);
@@ -85,12 +92,23 @@ public final class AiMatch {
     // ProAi resolves its static calculator once per JVM, on first use, from this setting.
     ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
     System.out.println("CALC " + calc);
+    System.out.println("BID " + (bid == null ? "none" : bid.summary()));
     final List<String> orientations = new ArrayList<>(List.of(patchedAlliance));
     if (opts.containsKey("swap")) {
       orientations.add(otherAlliance(map, patchedAlliance));
     }
     for (final String alliance : orientations) {
-      playOne(map, roundCap, patches, alliance, outRoot, recorderOptions, runConfig, props);
+      playOne(
+          map,
+          roundCap,
+          patches,
+          baselinePatches,
+          bid,
+          alliance,
+          outRoot,
+          recorderOptions,
+          runConfig,
+          props);
     }
     // Game threads (battle calculator workers etc.) are not all daemons.
     System.exit(0);
@@ -100,6 +118,8 @@ public final class AiMatch {
       final String map,
       final int roundCap,
       final Set<ProAiPatch> patches,
+      final Set<ProAiPatch> baselinePatches,
+      @Nullable final FixedBid bid,
       final String patchedAlliance,
       final Path outRoot,
       final GameRecorder.Options recorderOptions,
@@ -108,7 +128,9 @@ public final class AiMatch {
     final List<ProAi> ais = new ArrayList<>();
     final DecisionLog decisionLog = new DecisionLog();
     final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais, decisionLog);
-    final PlayerTypes.Type baseline = proAiType("Hard AI (baseline)", Set.of(), ais, decisionLog);
+    final PlayerTypes.Type baseline =
+        proAiType("Hard AI (baseline)", baselinePatches, ais, decisionLog);
+    final Map<String, Integer> bidTuvBySide = new TreeMap<>();
     final long start = System.nanoTime();
     final ServerGame game =
         GameTestUtils.setUpGameWithAis(
@@ -117,6 +139,10 @@ public final class AiMatch {
               requireAlliance(gameData, patchedAlliance);
               props.forEach((name, value) -> setProperty(gameData, name, value));
               System.out.println("PROPS " + props);
+              if (bid != null) {
+                bidTuvBySide.putAll(bid.apply(gameData, map));
+                System.out.println("BID applied, placed TUV by side " + bidTuvBySide);
+              }
             },
             player -> allianceOf(player).equals(patchedAlliance) ? patched : baseline);
     game.setStopGameOnDelegateExecutionStop(true);
@@ -125,14 +151,18 @@ public final class AiMatch {
     final Map<String, List<String>> patchesBySide = new LinkedHashMap<>();
     for (final GamePlayer player : data.getPlayerList().getPlayers()) {
       final String side = allianceOf(player);
-      final boolean isPatched = side.equals(patchedAlliance) && !patches.isEmpty();
+      final boolean onPatchedSide = side.equals(patchedAlliance);
+      // With no patches anywhere both sides are stock, so neither is labelled "patched".
+      final boolean isPatched = onPatchedSide && !(patches.isEmpty() && baselinePatches.isEmpty());
       variantBySide.put(side, isPatched ? "patched" : "baseline");
       patchesBySide.put(
-          side, isPatched ? patches.stream().map(Enum::name).sorted().toList() : List.of());
+          side,
+          (onPatchedSide ? patches : baselinePatches).stream().map(Enum::name).sorted().toList());
     }
     final Map<String, Object> config = new LinkedHashMap<>(runConfig);
     config.put("patched_alliance", patchedAlliance);
     config.put("patches_by_side", patchesBySide);
+    config.put("bid", bid == null ? null : bid.describe(bidTuvBySide));
     config.put("started_at", Instant.now().toString());
     final String gameId =
         DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now())
@@ -161,21 +191,23 @@ public final class AiMatch {
     result.put("capped", !over);
     result.put("seconds", Math.round(seconds * 10) / 10.0);
     result.put("victory_cities", victoryCities(data));
-    result.put("patch_hits", patchHits(ais));
+    result.put("patch_hits_by_side", patchHitsBySide(data, ais, variantBySide.keySet()));
     recorder.finish(result);
     System.out.printf(
-        "RESULT map=%s patched=%s patches=%s winner=%s winners=%s rounds=%d capped=%s"
-            + " seconds=%.1f victoryCities=%s patchHits=%s%n",
+        "RESULT map=%s patched=%s patches=%s baselinePatches=%s bid=%s winner=%s winners=%s"
+            + " rounds=%d capped=%s seconds=%.1f victoryCities=%s patchHitsBySide=%s%n",
         map,
         patchedAlliance,
         patches,
+        baselinePatches,
+        bid == null ? "none" : bid.shortHash(),
         winners.isEmpty() ? "none" : winnerAlliance,
         winners.stream().map(GamePlayer::getName).sorted().toList(),
         rounds,
         !over,
         seconds,
         victoryCities(data),
-        patchHits(ais));
+        patchHitsBySide(data, ais, variantBySide.keySet()));
     if (!game.isGameOver()) {
       // Resets ProAi's static battle calculator so a following game in this JVM starts clean.
       game.stopGame();
@@ -198,11 +230,16 @@ public final class AiMatch {
     };
   }
 
-  private static Map<String, Map<ProAiPatch, Integer>> patchHits(final List<ProAi> ais) {
-    final Map<String, Map<ProAiPatch, Integer>> hits = new TreeMap<>();
+  /** Side to player to patch hits, for every player that has patches; every side is a key. */
+  private static Map<String, Map<String, Map<ProAiPatch, Integer>>> patchHitsBySide(
+      final GameData data, final List<ProAi> ais, final Collection<String> sides) {
+    final Map<String, Map<String, Map<ProAiPatch, Integer>>> hits = new TreeMap<>();
+    sides.forEach(side -> hits.put(side, new TreeMap<>()));
     for (final ProAi ai : ais) {
       if (!ai.getProData().getPatches().isEmpty()) {
-        hits.put(ai.getName(), ai.getProData().getPatchHits());
+        final GamePlayer player = data.getPlayerList().getPlayerId(ai.getName());
+        hits.computeIfAbsent(allianceOf(player), k -> new TreeMap<>())
+            .put(ai.getName(), new TreeMap<>(ai.getProData().getPatchHits()));
       }
     }
     return hits;
