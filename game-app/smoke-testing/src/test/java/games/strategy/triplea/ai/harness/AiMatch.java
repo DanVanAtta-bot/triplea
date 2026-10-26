@@ -134,21 +134,22 @@ public final class AiMatch {
         new GameRecorder(
             game, outRoot, gameId, recorderOptions, decisionLog, variantBySide, config);
     System.out.println("RECORDS " + recorder.dir());
-    while (!game.isGameOver() && data.getSequence().getRound() <= roundCap) {
+    while (!game.isGameOver() && !recorder.isOver() && data.getSequence().getRound() <= roundCap) {
       recorder.beforeStep();
       game.runNextStep();
       recorder.afterStep();
     }
     final double seconds = (System.nanoTime() - start) / 1e9;
-    final boolean over = game.isGameOver();
+    final boolean over = recorder.isOver();
     final Collection<GamePlayer> winners =
         over ? ((EndRoundDelegate) data.getEndRoundDelegate()).getWinners() : List.of();
+    final int rounds = recorder.lastRound();
     final String winnerAlliance =
         winners.stream().map(AiMatch::allianceOf).distinct().collect(Collectors.joining("+"));
     final Map<String, Object> result = new LinkedHashMap<>();
     result.put("winner", winners.isEmpty() ? null : winnerAlliance);
     result.put("winners", winners.stream().map(GamePlayer::getName).sorted().toList());
-    result.put("rounds", over ? data.getSequence().getRound() : data.getSequence().getRound() - 1);
+    result.put("rounds", rounds);
     result.put("capped", !over);
     result.put("seconds", Math.round(seconds * 10) / 10.0);
     result.put("victory_cities", victoryCities(data));
@@ -162,12 +163,12 @@ public final class AiMatch {
         patches,
         winners.isEmpty() ? "none" : winnerAlliance,
         winners.stream().map(GamePlayer::getName).sorted().toList(),
-        over ? data.getSequence().getRound() : data.getSequence().getRound() - 1,
+        rounds,
         !over,
         seconds,
         victoryCities(data),
         patchHits(ais));
-    if (!over) {
+    if (!game.isGameOver()) {
       // Resets ProAi's static battle calculator so a following game in this JVM starts clean.
       game.stopGame();
     }

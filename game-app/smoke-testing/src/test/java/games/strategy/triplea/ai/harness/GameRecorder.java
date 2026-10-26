@@ -33,8 +33,10 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -150,6 +152,8 @@ final class GameRecorder {
   private final Map<Integer, List<Path>> ringByRound = new TreeMap<>();
   private final List<String> keptSaves = new ArrayList<>();
   private int roundsFlagged;
+  private boolean over;
+  private int lastRecordedRound;
 
   // Per-step state, set in beforeStep().
   private String stepKind;
@@ -216,6 +220,25 @@ final class GameRecorder {
     return dir;
   }
 
+  /**
+   * True once the game is decided. Victory is signalled in the round's last step (EndRound); the
+   * engine only marks the game over on the next {@code runNextStep()}, after the round counter has
+   * already moved on, so callers should stop on this instead.
+   */
+  boolean isOver() {
+    return over;
+  }
+
+  /** The last round a record was written for. */
+  int lastRound() {
+    return lastRecordedRound;
+  }
+
+  private List<GamePlayer> winners() {
+    return ((EndRoundDelegate) data.getEndRoundDelegate())
+        .getWinners().stream().sorted(Comparator.comparing(GamePlayer::getName)).toList();
+  }
+
   void beforeStep() {
     final GameStep step = data.getSequence().getStep();
     final IDelegate delegate = step.getDelegate();
@@ -244,8 +267,9 @@ final class GameRecorder {
     pendingBattles = List.of();
     prev = cur;
     final int nowRound = data.getSequence().getRound();
-    if (game.isGameOver()) {
+    if (game.isGameOver() || !winners().isEmpty()) {
       emitRoundRecords(round, true);
+      over = true;
     } else if (nowRound != round) {
       emitRoundRecords(round, false);
       round = nowRound;
@@ -398,10 +422,7 @@ final class GameRecorder {
   private void emitRoundRecords(final int recordRound, final boolean gameOver) {
     final Snapshot now = prev;
     final List<String> winners =
-        gameOver
-            ? ((EndRoundDelegate) data.getEndRoundDelegate())
-                .getWinners().stream().map(GamePlayer::getName).sorted().toList()
-            : List.of();
+        gameOver ? winners().stream().map(GamePlayer::getName).toList() : List.of();
     final int allTuv = now.tuvBySide().values().stream().mapToInt(Integer::intValue).sum();
     for (final SideAcc a : acc.values()) {
       if (recordRound > 0
@@ -494,6 +515,7 @@ final class GameRecorder {
       prevGap.put(side, gap);
     }
     flush();
+    lastRecordedRound = recordRound;
     pruneRing(recordRound);
     newRoundAccumulators();
   }
@@ -805,8 +827,10 @@ final class GameRecorder {
       }
       for (final Path save : saves) {
         try {
-          Files.move(
-              save, savesDir.resolve(save.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+          final Path target = savesDir.resolve(save.getFileName());
+          Files.move(save, target, StandardCopyOption.REPLACE_EXISTING);
+          // The engine writes saves owner-only; let other users of the box read them.
+          Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-rw-r--"));
         } catch (final IOException e) {
           throw new UncheckedIOException(e);
         }
