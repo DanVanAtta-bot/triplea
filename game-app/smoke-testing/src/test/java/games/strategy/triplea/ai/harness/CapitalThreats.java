@@ -35,15 +35,16 @@ import javax.annotation.Nullable;
  * <p>Reach is a cheap over-estimate, not a move validation: a land unit counts if its land distance
  * (through passable land not holding units at war with it; neutrals rules and canals ignored) is at
  * most its movement; an air unit if its distance is at most movement - 1 (one move kept to land);
- * land cargo already at sea if its sea zone is within 3 (transport move 2 + unload). Sea units and
- * bombardment are left out, and so are units that would need loading this turn. Only threats with a
- * land attacker are run through the calculator, and a result is reused while the attacking and
- * defending unit sets are unchanged.
+ * land cargo already at sea if its sea zone is within 3 (transport move 2 + unload); land units
+ * that one of the attacker's own transports can load this turn (see {@link #amphibiousUnits}). Sea
+ * units and bombardment are left out. Only threats with a land attacker are run through the
+ * calculator, and a result is reused while the attacking and defending unit sets are unchanged.
  */
 final class CapitalThreats {
 
   private static final int MAX_RANGE = 8;
   private static final int CARGO_RANGE = 3;
+  private static final int MAX_TRANSPORT_MOVE = 4;
 
   private record Cached(Set<UUID> attackers, Set<UUID> defenders, Map<String, Object> odds) {}
 
@@ -96,6 +97,8 @@ final class CapitalThreats {
           continue;
         }
         final List<Unit> attackers = reachingUnits(enemy, distances(capital, enemy), anyDist);
+        final List<Unit> amphibious = amphibiousUnits(enemy, capital, attackers);
+        attackers.addAll(amphibious);
         if (attackers.isEmpty()) {
           continue;
         }
@@ -106,6 +109,7 @@ final class CapitalThreats {
         threat.put("attacker_side", sideOf.apply(enemy));
         threat.put("moves_before_owner", movesBefore(turnPlayer, enemy, owner));
         threat.put("attackers", countByType(attackers));
+        threat.put("amphibious", countByType(amphibious));
         threat.put("attacker_tuv", tuvOf.apply(attackers));
         threat.put("has_land_attackers", hasLand);
         final Map<String, Object> odds;
@@ -277,6 +281,98 @@ final class CapitalThreats {
       }
     }
     return result;
+  }
+
+  /**
+   * Land units, not already in {@code reached}, that {@code enemy}'s own sea transports can load
+   * this turn and unload onto {@code capital}: a transport with movement m in zone S can load in
+   * any zone Z with seaDist(S, Z) + seaDist(Z, a zone touching the capital) <= m, from land
+   * touching Z. Each transport takes the highest-attack candidates that fit its capacity left after
+   * its current cargo. Enemy ships on the way and land moves before loading are ignored.
+   */
+  private List<Unit> amphibiousUnits(
+      final GamePlayer enemy, final Territory capital, final Collection<Unit> reached) {
+    final List<Territory> landingZones =
+        data.getMap().getNeighbors(capital).stream().filter(Territory::isWater).toList();
+    final List<Unit> loaded = new ArrayList<>();
+    if (landingZones.isEmpty()) {
+      return loaded;
+    }
+    final Map<Territory, Integer> toLanding = seaDistances(landingZones);
+    final Set<Unit> taken = new HashSet<>(reached);
+    final Predicate<Unit> cargo =
+        Matches.unitIsOwnedBy(enemy)
+            .and(Matches.unitIsLand())
+            .and(Matches.unitIsNotInfrastructure())
+            .and(Matches.unitCanBeTransported());
+    final List<Territory> zones =
+        toLanding.keySet().stream().sorted(Comparator.comparing(Territory::getName)).toList();
+    for (final Territory zone : zones) {
+      for (final Unit transport :
+          zone.getMatches(Matches.unitIsOwnedBy(enemy).and(Matches.unitIsSeaTransport()))) {
+        final int move = transport.getUnitAttachment().getMovement(enemy);
+        if (toLanding.get(zone) > move) {
+          continue;
+        }
+        int space = transport.getUnitAttachment().getTransportCapacity();
+        for (final Unit aboard : transport.getTransporting(zone)) {
+          space -= aboard.getUnitAttachment().getTransportCost();
+        }
+        final Set<Unit> candidates = new HashSet<>();
+        for (final Map.Entry<Territory, Integer> e : seaDistances(List.of(zone)).entrySet()) {
+          final Integer rest = toLanding.get(e.getKey());
+          if (rest == null || e.getValue() + rest > move) {
+            continue;
+          }
+          for (final Territory shore : data.getMap().getNeighbors(e.getKey())) {
+            if (!shore.isWater()) {
+              candidates.addAll(shore.getMatches(cargo));
+            }
+          }
+        }
+        candidates.removeAll(taken);
+        final List<Unit> byAttack =
+            candidates.stream()
+                .sorted(
+                    Comparator.comparingInt((Unit u) -> -u.getUnitAttachment().getAttack(enemy))
+                        .thenComparingInt(u -> u.getUnitAttachment().getTransportCost())
+                        .thenComparing(Unit::getId))
+                .toList();
+        for (final Unit u : byAttack) {
+          final int cost = u.getUnitAttachment().getTransportCost();
+          if (cost <= space) {
+            space -= cost;
+            loaded.add(u);
+            taken.add(u);
+          }
+        }
+      }
+    }
+    return loaded;
+  }
+
+  /** Breadth-first distances over sea zones only, from the nearest of {@code sources}. */
+  private Map<Territory, Integer> seaDistances(final Collection<Territory> sources) {
+    final Map<Territory, Integer> dist = new HashMap<>();
+    final Deque<Territory> queue = new ArrayDeque<>();
+    for (final Territory source : sources) {
+      dist.put(source, 0);
+      queue.add(source);
+    }
+    while (!queue.isEmpty()) {
+      final Territory t = queue.poll();
+      final int d = dist.get(t);
+      if (d >= MAX_TRANSPORT_MOVE) {
+        continue;
+      }
+      for (final Territory n : data.getMap().getNeighbors(t)) {
+        if (n.isWater() && !dist.containsKey(n)) {
+          dist.put(n, d + 1);
+          queue.add(n);
+        }
+      }
+    }
+    return dist;
   }
 
   /**
