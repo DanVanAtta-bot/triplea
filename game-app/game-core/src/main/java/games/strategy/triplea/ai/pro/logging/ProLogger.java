@@ -43,7 +43,21 @@ public final class ProLogger {
    * just about everything else. (There's also the SERVER, INFO, etc. levels) Just keep these things
    * in mind while adding new logging code.
    */
+  // Temporary (ai-blunders): -Dproai.log=FINE|FINER|FINEST prints ProAI logs to stdout headless.
+  private static final @Nullable Level STDOUT_LEVEL = parseStdoutLevel();
+
+  private static @Nullable Level parseStdoutLevel() {
+    final String v = System.getProperty("proai.log");
+    return v == null || v.isBlank() ? null : Level.parse(v);
+  }
+
   public static void log(final Level level, final String message, final @Nullable Throwable t) {
+    if (STDOUT_LEVEL != null) {
+      if (level.intValue() >= STDOUT_LEVEL.intValue()) {
+        System.out.println("[PRO " + level + "] " + formatMessage(message, t, level));
+      }
+      return;
+    }
     final ProLogSettings settings = ProLogSettings.loadSettings();
     if (!settings.isLogEnabled()) {
       return; // Skip displaying to settings window if settings window option is turned off
