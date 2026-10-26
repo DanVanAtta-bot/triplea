@@ -163,6 +163,9 @@ public abstract class AbstractProAi extends AbstractAi {
     final long start = System.currentTimeMillis();
     ProLogUi.notifyStartOfRound(data.getSequence().getRound(), player.getName());
     initializeData();
+    if (proData.isPatchOn(ProAiPatch.NO_OP)) {
+      ProLogger.info(player.getName() + " NO_OP patch gate reached");
+    }
     if (pusToSpend <= 0) {
       return;
     }

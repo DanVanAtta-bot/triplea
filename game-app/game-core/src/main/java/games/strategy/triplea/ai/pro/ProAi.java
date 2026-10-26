@@ -4,6 +4,8 @@ import games.strategy.engine.data.GameData;
 import games.strategy.engine.framework.GameShutdownRegistry;
 import games.strategy.triplea.odds.calculator.IBattleCalculator;
 import games.strategy.triplea.odds.calculator.LazyBattleCalculator;
+import java.util.Collection;
+import java.util.Set;
 
 public class ProAi extends AbstractProAi {
   // Shared across all ProAi instances. A LazyBattleCalculator so constructing a ProAi never reads
@@ -11,7 +13,11 @@ public class ProAi extends AbstractProAi {
   private static final IBattleCalculator concurrentCalc = new LazyBattleCalculator();
 
   public ProAi(final String name, final String playerLabel) {
-    super(name, concurrentCalc, new ProData(), playerLabel);
+    this(name, playerLabel, Set.of());
+  }
+
+  public ProAi(final String name, final String playerLabel, final Collection<ProAiPatch> patches) {
+    super(name, concurrentCalc, new ProData(patches), playerLabel);
     // cuncurrentCalc is static so that it can be shared across all ProAi instances
     // at the end of a game, it needs to be cleared up
     GameShutdownRegistry.registerShutdownAction(() -> concurrentCalc.setGameData(null));
