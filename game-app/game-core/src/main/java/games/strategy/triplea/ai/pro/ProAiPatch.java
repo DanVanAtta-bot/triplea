@@ -46,4 +46,26 @@ public enum ProAiPatch {
    * on fresh captures; the engine refuses both ("conquered this turn") and the units are lost.
    */
   PURCHASE_SIM_CONQUERED,
+  /**
+   * Land purchases for a territory the enemy can attack score units as defenders without crediting
+   * attack support: defender buys rank infantry over artillery, and the non-fodder pick ranks
+   * armour over artillery. Stock counts artillery's attack bonus even when the units will next
+   * defend, so a front-line power (Russia) bought artillery instead of armour or infantry. Counts a
+   * hit per pick whose scoring this changes.
+   */
+  BUY_DEFENSIVE_LAND_MIX,
+  /**
+   * Purchase buys no warships for a sea zone once own and allied warships there already match the
+   * enemy warships that can reach it: the rest of the threat is air, which more ships answer badly.
+   * Stock keeps buying until its fleet holds against every plane in range, so the UK hoarded
+   * destroyers and carriers. Counts a hit each time it stops a warship purchase.
+   */
+  BUY_LESS_IDLE_NAVY,
+  /**
+   * Purchase buys at most one new transport per sea zone a turn unless land units are still waiting
+   * at the coast after the existing transports are filled; the remaining production buys land units
+   * that wait for the transports. Stock pairs every new transport with fresh cargo until the PUs
+   * run out, so the US spent half its money on navy. Counts a hit per transport skipped.
+   */
+  BUY_TRANSPORTS_ON_DEMAND,
 }
