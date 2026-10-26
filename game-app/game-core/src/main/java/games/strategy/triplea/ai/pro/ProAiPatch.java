@@ -26,4 +26,17 @@ public enum ProAiPatch {
    * noise straddles the 75%/95% cutoffs.
    */
   ODDS_MORE_RUNS,
+  /**
+   * The purchase-phase turn simulation plays a land battle that the attacker wins less than {@code
+   * winPercentage} of the time (95%, dice 90%) as lost: the territory isn't taken, every defender
+   * survives, and the attacking land units are gone. Stock plays every battle as won, so purchase,
+   * placement and the stored non-combat plan never hedge against a planned capture failing.
+   */
+  PURCHASE_SIM_ODDS,
+  /**
+   * The purchase-phase turn simulation no longer gives the attacker a territory that it can't take
+   * even when the battle is won: a strategic bombing raid, or a land battle whose average outcome
+   * leaves no attacking land unit. Stock transfers ownership after every simulated battle.
+   */
+  PURCHASE_SIM_NO_PHANTOM,
 }

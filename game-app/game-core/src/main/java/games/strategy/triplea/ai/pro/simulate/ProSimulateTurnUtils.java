@@ -9,6 +9,7 @@ import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.Unit;
 import games.strategy.engine.data.changefactory.ChangeFactory;
 import games.strategy.engine.delegate.IDelegateBridge;
+import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.ai.pro.data.ProBattleResult;
 import games.strategy.triplea.ai.pro.data.ProTerritory;
@@ -68,6 +69,14 @@ public final class ProSimulateTurnUtils {
 
         final ProBattleResult result =
             calc.callBattleCalc(proData, t, attackers, defenders, bombardingUnits);
+        final boolean isNormalLandBattle = entry.getKey() == BattleType.NORMAL && !t.isWater();
+        if (isNormalLandBattle
+            && result.getWinPercentage() < proData.getWinPercentage()
+            && proData.isPatchOn(ProAiPatch.PURCHASE_SIM_ODDS)) {
+          simulateLostBattle(t, attackers, result, delegateBridge);
+          battleDelegate.getBattleTracker().removeBattle(battle, data);
+          continue;
+        }
         final Collection<Unit> remainingAttackers = result.getAverageAttackersRemaining();
         final Collection<Unit> remainingDefenders = result.getAverageDefendersRemaining();
         ProLogger.debug("remainingAttackers=" + remainingAttackers);
@@ -88,6 +97,16 @@ public final class ProSimulateTurnUtils {
         delegateBridge.addChange(attackersKilledChange);
         final Change defendersKilledChange = ChangeFactory.removeUnits(t, defendersToRemove);
         delegateBridge.addChange(defendersKilledChange);
+        final boolean cannotTakeTerritory =
+            entry.getKey() != BattleType.NORMAL
+                || (!t.isWater() && !result.isHasLandUnitRemaining());
+        if (cannotTakeTerritory
+            && !t.isWater()
+            && !Matches.isTerritoryAllied(player).test(t)
+            && proData.isPatchOn(ProAiPatch.PURCHASE_SIM_NO_PHANTOM)) {
+          battleDelegate.getBattleTracker().removeBattle(battle, data);
+          continue;
+        }
         BattleTracker.captureOrDestroyUnits(t, player, player, delegateBridge, null);
         if (!checkIfCapturedTerritoryIsAlliedCapital(t, data, player, delegateBridge)) {
           delegateBridge.addChange(ChangeFactory.changeOwner(t, player));
@@ -102,6 +121,23 @@ public final class ProSimulateTurnUtils {
                 + updatedTerritory.getUnits());
       }
     }
+  }
+
+  /**
+   * Plays a battle as lost: defenders all survive and the attacking land units are gone. Air keeps
+   * its average losses, since it would fly home after a failed attack.
+   */
+  private static void simulateLostBattle(
+      final Territory t,
+      final Collection<Unit> attackers,
+      final ProBattleResult result,
+      final IDelegateBridge delegateBridge) {
+    final List<Unit> attackersToRemove =
+        CollectionUtils.getMatches(attackers, Matches.unitIsNotAir());
+    final List<Unit> airLost = CollectionUtils.getMatches(attackers, Matches.unitIsAir());
+    airLost.removeAll(result.getAverageAttackersRemaining());
+    attackersToRemove.addAll(airLost);
+    delegateBridge.addChange(ChangeFactory.removeUnits(t, attackersToRemove));
   }
 
   /**
