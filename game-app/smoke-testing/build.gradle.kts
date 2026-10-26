@@ -62,3 +62,16 @@ tasks.register<JavaExec>("aiMatch") {
     // count; cap it so parallel games don't swamp the box. -PaiMatchCpus=N to change.
     jvmArgs("-XX:ActiveProcessorCount=" + (project.findProperty("aiMatchCpus") ?: "4"))
 }
+
+// Kata runner: replays one player's turn from a save under several variants and scores it.
+// ./gradlew :smoke-testing:kata --args="run --save /abs/x.tsvg --player Germans --variant ai:none --n 5"
+tasks.register<JavaExec>("kata") {
+    group = "application"
+    description = "Kata: replay a saved turn under AI/script variants, play on, score."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("games.strategy.triplea.ai.kata.Kata")
+    workingDir = projectDir
+    maxHeapSize = "3G"
+    // Caps the battle calculator's worker pool (it sizes itself from the CPU count).
+    jvmArgs("-XX:ActiveProcessorCount=4")
+}

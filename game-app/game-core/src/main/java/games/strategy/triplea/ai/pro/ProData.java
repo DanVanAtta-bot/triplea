@@ -48,7 +48,7 @@ public final class ProData {
   private GameData data;
   private GamePlayer player;
 
-  private final Set<ProAiPatch> patches;
+  private Set<ProAiPatch> patches;
   // How often each enabled patch's gate was hit; a patch that never fires cannot change results.
   private final Map<ProAiPatch, Integer> patchHits = new EnumMap<>(ProAiPatch.class);
 
@@ -57,6 +57,11 @@ public final class ProData {
   }
 
   public ProData(final Collection<ProAiPatch> patches) {
+    this.patches = Set.copyOf(patches);
+  }
+
+  /** Swaps the enabled patches, eg: to scope a variant to a single turn. */
+  public void setPatches(final Collection<ProAiPatch> patches) {
     this.patches = Set.copyOf(patches);
   }
 
