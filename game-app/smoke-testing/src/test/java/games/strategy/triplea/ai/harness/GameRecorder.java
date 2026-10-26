@@ -11,6 +11,7 @@ import games.strategy.engine.data.Unit;
 import games.strategy.engine.delegate.IDelegate;
 import games.strategy.engine.framework.ServerGame;
 import games.strategy.triplea.Constants;
+import games.strategy.triplea.ai.pro.ProDecisionListener;
 import games.strategy.triplea.ai.pro.ProDecisionListener.AttackDecision;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.AbstractEndTurnDelegate;
@@ -39,9 +40,11 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -96,7 +99,7 @@ final class GameRecorder {
     final IBattle battle;
     final Territory territory;
     final GamePlayer attacker;
-    final String ownerBefore;
+    String ownerBefore;
     final List<UUID> attackers;
     final List<UUID> defenders;
     final boolean risksCapitalOrVc;
@@ -154,6 +157,17 @@ final class GameRecorder {
   private int roundsFlagged;
   private boolean over;
   private int lastRecordedRound;
+  private final List<GamePlayer> turnOrder;
+  private final CapitalThreats capitalThreats;
+  // Territory owners after the last step, and before the current turn's combat move (walk-ins
+  // change the owner at move time, before the battle step).
+  private Map<Territory, GamePlayer> owners;
+  private Map<Territory, GamePlayer> ownersBeforeCombatMove = Map.of();
+
+  /** A capture still open to recapture: the capturer hasn't had its next turn yet. */
+  private record Capture(GamePlayer by, String side, int round) {}
+
+  private final Map<Territory, Capture> openCaptures = new HashMap<>();
 
   // Per-step state, set in beforeStep().
   private String stepKind;
@@ -197,6 +211,8 @@ final class GameRecorder {
                     (a, b) -> a,
                     LinkedHashMap::new)));
     this.config.put("variant_by_side", variantBySide);
+    this.turnOrder = turnOrder(data);
+    this.config.put("turn_order", turnOrder.stream().map(GamePlayer::getName).toList());
     this.config.put("odds_runs", options.oddsRuns());
     this.config.put(
         "flag_rules",
@@ -212,8 +228,11 @@ final class GameRecorder {
     }
     newRoundAccumulators();
     prev = snapshot();
+    owners = currentOwners();
     round = data.getSequence().getRound();
     emitRoundRecords(0, false);
+    capitalThreats =
+        new CapitalThreats(data, oddsCalc, options.oddsRuns(), sideOf::get, this::tuvOf, turnOrder);
   }
 
   Path dir() {
@@ -246,6 +265,12 @@ final class GameRecorder {
     stepRound = data.getSequence().getRound();
     stepKind = kindOf(delegate, step.getName());
     pusBefore = pusByPlayer();
+    if (stepKind.equals("combat_move")) {
+      ownersBeforeCombatMove = new HashMap<>(owners);
+    }
+    if (stepPlayer != null) {
+      openCaptures.values().removeIf(c -> c.by().equals(stepPlayer) && c.round() < stepRound);
+    }
     if (delegate instanceof PurchaseDelegate
         && !(delegate instanceof BidPurchaseDelegate)
         && stepPlayer != null) {
@@ -266,14 +291,81 @@ final class GameRecorder {
     }
     pendingBattles = List.of();
     prev = cur;
+    trackOwnership();
+    if (stepKind.equals("end_turn") && stepPlayer != null) {
+      capitalThreats.afterTurn(gameId, stepRound, stepPlayer).forEach(this::write);
+    }
     final int nowRound = data.getSequence().getRound();
     if (game.isGameOver() || !winners().isEmpty()) {
       emitRoundRecords(round, true);
+      capitalThreats.roundEnded(round);
       over = true;
     } else if (nowRound != round) {
       emitRoundRecords(round, false);
+      capitalThreats.roundEnded(round);
       round = nowRound;
     }
+  }
+
+  /**
+   * Flags a side that lost a capital ({@code capital_lost:<territory>}), and a side whose capture
+   * was taken back before the capturing player's next turn ({@code recaptured:<territory>}).
+   */
+  private void trackOwnership() {
+    final Map<Territory, GamePlayer> now = currentOwners();
+    for (final Map.Entry<Territory, GamePlayer> e : now.entrySet()) {
+      final Territory t = e.getKey();
+      final GamePlayer was = owners.get(t);
+      final String oldSide = was == null ? null : sideOf.get(was);
+      final String newSide = sideOf.get(e.getValue());
+      if (Objects.equals(oldSide, newSide)) {
+        continue;
+      }
+      final boolean capital =
+          TerritoryAttachment.get(t).map(TerritoryAttachment::isCapital).orElse(false);
+      if (capital && oldSide != null) {
+        addFlag(oldSide, "capital_lost:" + t.getName());
+      }
+      final Capture open = openCaptures.remove(t);
+      if (open != null && open.side().equals(oldSide)) {
+        addFlag(open.side(), "recaptured:" + t.getName());
+      }
+      if (newSide != null) {
+        openCaptures.put(
+            t, new Capture(stepPlayer == null ? e.getValue() : stepPlayer, newSide, stepRound));
+      }
+    }
+    owners = now;
+  }
+
+  private void addFlag(final String side, final String flag) {
+    final SideAcc a = acc.get(side);
+    if (a != null && !a.flags.contains(flag)) {
+      a.flags.add(flag);
+    }
+  }
+
+  private Map<Territory, GamePlayer> currentOwners() {
+    final Map<Territory, GamePlayer> result = new HashMap<>();
+    for (final Territory t : data.getMap().getTerritories()) {
+      if (!t.isWater()) {
+        result.put(t, t.getOwner());
+      }
+    }
+    return result;
+  }
+
+  /** Players in step order, bid steps excluded; the sequence repeats it every round. */
+  private static List<GamePlayer> turnOrder(final GameData data) {
+    final Set<GamePlayer> order = new LinkedHashSet<>();
+    for (final GameStep step : data.getSequence()) {
+      if (step.getPlayerId() != null
+          && !GameStep.isBidStepName(step.getName())
+          && !GameStep.isBidPlaceStepName(step.getName())) {
+        order.add(step.getPlayerId());
+      }
+    }
+    return List.copyOf(order);
   }
 
   /** Writes the final game.json (config plus {@code result}) and drops unflagged ring saves. */
@@ -291,6 +383,7 @@ final class GameRecorder {
       final Map<String, Object> fullResult = new LinkedHashMap<>(result);
       fullResult.put("rounds_flagged", roundsFlagged);
       fullResult.put("saves_kept", keptSaves);
+      fullResult.put("capital_threat_cost_by_round", capitalThreats.costByRound());
       config.put("result", fullResult);
       writeConfig();
     } catch (final IOException e) {
@@ -681,6 +774,7 @@ final class GameRecorder {
     } else {
       r.put("odds_harness", null);
     }
+    pending.ownerBefore = ownersBeforeCombatMove.getOrDefault(t, t.getOwner()).getName();
     return pending;
   }
 
@@ -698,6 +792,10 @@ final class GameRecorder {
       oddsAi.put("strafing", ai.strafing());
       oddsAi.put("bombers", ai.bombers());
       oddsAi.put("accepted", ai.accepted());
+      oddsAi.put("runs", ai.runs());
+      oddsAi.put("can_hold", ai.canHold());
+      oddsAi.put(
+          "can_hold_branch", ai.canHoldTrace() == null ? "default" : ai.canHoldTrace().branch());
       oddsAi.put("src", "combat_move_hook");
       r.put("odds_ai", oddsAi);
     }
@@ -800,6 +898,23 @@ final class GameRecorder {
       r.put("max_win", d.maxWinPercentage() == null ? null : round4(d.maxWinPercentage() / 100));
       r.put("can_hold", d.canHold());
       r.put("value", round4(d.value()));
+      r.put("runs", d.runs());
+      r.put("assumed_defenders", d.assumedDefenders());
+      final ProDecisionListener.CanHoldTrace trace = d.canHoldTrace();
+      r.put("can_hold_branch", trace == null ? "default" : trace.branch());
+      r.put("can_hold_pass", trace == null ? null : trace.pass());
+      if (trace == null || trace.counterWinPercentage() == null) {
+        r.put("can_hold_counter", null);
+      } else {
+        final Map<String, Object> counter = new LinkedHashMap<>();
+        counter.put("win", round4(trace.counterWinPercentage() / 100));
+        counter.put("tuv_swing", round4(trace.counterTuvSwing()));
+        counter.put("has_land_remaining", trace.counterHasLandUnitRemaining());
+        counter.put("runs", trace.counterRuns());
+        counter.put("my_defenders", trace.myDefenders());
+        counter.put("enemy_attackers", trace.enemyAttackers());
+        r.put("can_hold_counter", counter);
+      }
       write(r);
     }
   }
