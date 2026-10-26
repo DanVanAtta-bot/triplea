@@ -1,5 +1,6 @@
 package games.strategy.triplea.ai.harness;
 
+import com.google.gson.JsonObject;
 import games.strategy.engine.data.GameData;
 import games.strategy.engine.data.GamePlayer;
 import games.strategy.engine.data.GameTestUtils;
@@ -46,6 +47,12 @@ import javax.annotation.Nullable;
  * FixedBid}. {@code --props} overrides game options by their exact XML name; Tech Development is
  * always forced off. Every game writes {@code <out>/<game id>/} with {@code game.json}, {@code
  * records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
+ *
+ * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
+ * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
+ * rebuilds a forum-save position and plays on from it instead of the map's start, without the
+ * recorder; {@code --play-rounds <n>} stops n rounds later at the starting step. See {@link
+ * #playFromHuman}.
  */
 public final class AiMatch {
 
@@ -93,6 +100,27 @@ public final class AiMatch {
     ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
     System.out.println("CALC " + calc);
     System.out.println("BID " + (bid == null ? "none" : bid.summary()));
+    if (opts.containsKey("start") || opts.containsKey("start-list")) {
+      if (bid != null || opts.containsKey("swap")) {
+        throw new IllegalArgumentException("--bid and --swap don't apply to a human start");
+      }
+      final String spec =
+          opts.containsKey("start")
+              ? opts.get("start")
+              : HumanStart.pick(
+                  Path.of(opts.get("start-list")), opts.getOrDefault("start-key", ""));
+      playFromHuman(
+          map,
+          roundCap,
+          patches,
+          baselinePatches,
+          patchedAlliance,
+          outRoot,
+          HumanStart.read(spec),
+          Integer.parseInt(opts.getOrDefault("play-rounds", "0")),
+          props);
+      System.exit(0);
+    }
     final List<String> orientations = new ArrayList<>(List.of(patchedAlliance));
     if (opts.containsKey("swap")) {
       orientations.add(otherAlliance(map, patchedAlliance));
@@ -214,6 +242,126 @@ public final class AiMatch {
     }
   }
 
+  /**
+   * Plays on from a human position (see {@link HumanStart}) with the human game's options, then
+   * {@code --props}. Writes {@code <out>/<game id>/play.jsonl} (see {@link PlayLog}). With {@code
+   * playRounds > 0} it stops when the starting step comes round again that many rounds later and
+   * also writes the history of the play; otherwise it plays to game over or the round cap.
+   */
+  private static void playFromHuman(
+      final String map,
+      final int roundCap,
+      final Set<ProAiPatch> patches,
+      final Set<ProAiPatch> baselinePatches,
+      final String patchedAlliance,
+      final Path outRoot,
+      final HumanStart start,
+      final int playRounds,
+      final Map<String, String> props)
+      throws IOException {
+    final List<ProAi> ais = new ArrayList<>();
+    final DecisionLog decisionLog = new DecisionLog();
+    final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais, decisionLog);
+    final PlayerTypes.Type baseline =
+        proAiType("Hard AI (baseline)", baselinePatches, ais, decisionLog);
+    final Map<String, String> options = new TreeMap<>();
+    final List<String> optionErrors = new ArrayList<>();
+    final long t0 = System.nanoTime();
+    final ServerGame game =
+        GameTestUtils.setUpGameWithAis(
+            map,
+            gameData -> {
+              requireAlliance(gameData, patchedAlliance);
+              options.putAll(start.options(gameData));
+              options.putAll(props);
+              options.forEach(
+                  (name, value) -> {
+                    try {
+                      setProperty(gameData, name, value);
+                    } catch (final RuntimeException e) {
+                      optionErrors.add(name + "=" + value + ": " + e.getMessage());
+                    }
+                  });
+              System.out.println("PROPS " + options + " errors=" + optionErrors);
+            },
+            player -> allianceOf(player).equals(patchedAlliance) ? patched : baseline);
+    game.setStopGameOnDelegateExecutionStop(true);
+    final GameData data = game.getData();
+    final List<String> missing = start.apply(game);
+    final int startRound = data.getSequence().getRound();
+    final String startStep = data.getSequence().getStep().getName();
+    System.out.println(
+        "START "
+            + start.spec()
+            + " at "
+            + startStep
+            + " round "
+            + startRound
+            + " missing="
+            + missing);
+    final String gameId =
+        DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now())
+            + "-"
+            + UUID.randomUUID().toString().substring(0, 6);
+    final Path dir = outRoot.resolve(gameId);
+    System.out.println("RECORDS " + dir);
+    final EndRoundDelegate endRound = (EndRoundDelegate) data.getEndRoundDelegate();
+    try (PlayLog log = new PlayLog(data, dir.resolve("play.jsonl"))) {
+      final JsonObject header = new JsonObject();
+      header.addProperty("t", "start");
+      header.addProperty("spec", start.spec());
+      header.addProperty("map", map);
+      header.addProperty("round", startRound);
+      header.addProperty("step", startStep);
+      header.addProperty("player", start.player);
+      header.addProperty("play_rounds", playRounds);
+      header.addProperty("missing", missing.toString());
+      header.addProperty("options", options.toString());
+      header.addProperty("option_errors", optionErrors.toString());
+      log.line(header);
+      boolean stopped = false;
+      while (!game.isGameOver()
+          && endRound.getWinners().isEmpty()
+          && data.getSequence().getRound() <= roundCap) {
+        if (playRounds > 0
+            && data.getSequence().getRound() == startRound + playRounds
+            && data.getSequence().getStep().getName().equals(startStep)) {
+          stopped = true;
+          break;
+        }
+        log.beforeStep();
+        game.runNextStep();
+      }
+      final Collection<GamePlayer> winners = endRound.getWinners();
+      final String winnerAlliance =
+          winners.stream().map(AiMatch::allianceOf).distinct().collect(Collectors.joining("+"));
+      final boolean over = !winners.isEmpty();
+      final JsonObject end = log.summary("end");
+      end.addProperty("winner", over ? winnerAlliance : null);
+      end.addProperty("capped", !over);
+      end.addProperty("stopped_after_rounds", stopped);
+      end.addProperty("seconds", Math.round((System.nanoTime() - t0) / 1e8) / 10.0);
+      log.line(end);
+      if (playRounds > 0) {
+        log.exportHistory(Integer.MAX_VALUE);
+      }
+      System.out.printf(
+          "RESULT map=%s patched=%s patches=%s baselinePatches=%s bid=none winner=%s winners=%s"
+              + " rounds=%d capped=%s seconds=%.1f victoryCities=%s patchHitsBySide=%s%n",
+          map,
+          patchedAlliance,
+          patches,
+          baselinePatches,
+          over ? winnerAlliance : "none",
+          winners.stream().map(GamePlayer::getName).sorted().toList(),
+          data.getSequence().getRound(),
+          !over,
+          (System.nanoTime() - t0) / 1e9,
+          victoryCities(data),
+          patchHitsBySide(data, ais, List.of("Axis", "Allies")));
+    }
+  }
+
   private static PlayerTypes.Type proAiType(
       final String label,
       final Set<ProAiPatch> patches,
@@ -256,7 +404,7 @@ public final class AiMatch {
     return byAlliance;
   }
 
-  private static String allianceOf(final GamePlayer player) {
+  static String allianceOf(final GamePlayer player) {
     return GameRecorder.sideOf(player);
   }
 
