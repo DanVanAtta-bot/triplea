@@ -11,6 +11,8 @@ import games.strategy.engine.framework.ServerGame;
 import games.strategy.engine.framework.startup.ui.PlayerTypes;
 import games.strategy.engine.player.Player;
 import games.strategy.triplea.Constants;
+import games.strategy.triplea.ai.kata.KataAi;
+import games.strategy.triplea.ai.kata.KataScript;
 import games.strategy.triplea.ai.pro.ProAi;
 import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.attachments.TerritoryAttachment;
@@ -42,7 +44,9 @@ import javax.annotation.Nullable;
  * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> [--baseline-patches
  * <P1,P2|none>] --rounds <cap> [--calc bounded|concurrent] [--props "Name=value,Name2=value"]
  * [--bid <file.bid.json>] [--swap] [--out <dir>] [--odds-runs <n>] [--flag-combat <tuv>]
- * [--flag-odds <0..1>]}. {@code --swap} plays a second game with the patched set given to the other
+ * [--flag-odds <0..1>] [--scripts <player:round:file.json,...>]}. {@code --scripts} plays that
+ * player's turn of that round from a kata script (see {@link KataScript}; phases the script leaves
+ * out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a second game with the patched set given to the other
  * alliance (two-alliance maps only). {@code --bid} applies a fixed bid before round 1, see {@link
  * FixedBid}. {@code --props} overrides game options by their exact XML name; Tech Development is
  * always forced off. Every game writes {@code <out>/<game id>/} with {@code game.json}, {@code
@@ -67,6 +71,8 @@ public final class AiMatch {
         parsePatches(opts.getOrDefault("baseline-patches", "none"));
     final FixedBid bid = opts.containsKey("bid") ? FixedBid.load(Path.of(opts.get("bid"))) : null;
     final String patchedAlliance = opts.getOrDefault("patched", "Axis");
+    final Map<String, Map<Integer, KataScript>> scripts =
+        parseScripts(opts.getOrDefault("scripts", ""));
     final Map<String, String> props = parseProps(opts.getOrDefault("props", ""));
     props.put(Constants.TECH_DEVELOPMENT, "false");
 
@@ -94,12 +100,14 @@ public final class AiMatch {
     runConfig.put("engine_commit", git("rev-parse", "HEAD"));
     runConfig.put("engine_dirty", !git("status", "--porcelain", "--untracked-files=no").isEmpty());
     runConfig.put("java", System.getProperty("java.version"));
+    runConfig.put("scripts", opts.getOrDefault("scripts", ""));
     runConfig.put("cpus", Runtime.getRuntime().availableProcessors());
     GameTestUtils.setUp();
     // ProAi resolves its static calculator once per JVM, on first use, from this setting.
     ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
     System.out.println("CALC " + calc);
     System.out.println("BID " + (bid == null ? "none" : bid.summary()));
+    System.out.println("SCRIPTS " + opts.getOrDefault("scripts", "none"));
     if (opts.containsKey("start") || opts.containsKey("start-list")) {
       if (bid != null || opts.containsKey("swap")) {
         throw new IllegalArgumentException("--bid and --swap don't apply to a human start");
@@ -136,7 +144,8 @@ public final class AiMatch {
           outRoot,
           recorderOptions,
           runConfig,
-          props);
+          props,
+          scripts);
     }
     // Game threads (battle calculator workers etc.) are not all daemons.
     System.exit(0);
@@ -152,12 +161,16 @@ public final class AiMatch {
       final Path outRoot,
       final GameRecorder.Options recorderOptions,
       final Map<String, Object> runConfig,
-      final Map<String, String> props) {
+      final Map<String, String> props,
+      final Map<String, Map<Integer, KataScript>> scripts) {
     final List<ProAi> ais = new ArrayList<>();
+    final Map<String, KataAi> scripted = new TreeMap<>();
     final DecisionLog decisionLog = new DecisionLog();
-    final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais, decisionLog);
+    final PlayerTypes.Type patched =
+        proAiType("Hard AI (patched)", patches, ais, decisionLog, scripts.keySet(), scripted);
     final PlayerTypes.Type baseline =
-        proAiType("Hard AI (baseline)", baselinePatches, ais, decisionLog);
+        proAiType(
+            "Hard AI (baseline)", baselinePatches, ais, decisionLog, scripts.keySet(), scripted);
     final Map<String, Integer> bidTuvBySide = new TreeMap<>();
     final long start = System.nanoTime();
     final ServerGame game =
@@ -200,7 +213,18 @@ public final class AiMatch {
         new GameRecorder(
             game, outRoot, gameId, recorderOptions, decisionLog, variantBySide, config);
     System.out.println("RECORDS " + recorder.dir());
+    if (!scripted.keySet().equals(scripts.keySet())) {
+      throw new IllegalArgumentException(
+          "--scripts names unknown players: " + scripts.keySet() + ", map has " + scripted.keySet());
+    }
     while (!game.isGameOver() && !recorder.isOver() && data.getSequence().getRound() <= roundCap) {
+      final int round = data.getSequence().getRound();
+      scripted.forEach(
+          (name, ai) -> {
+            final KataScript script = scripts.get(name).get(round);
+            ai.setScript(script);
+            ai.setTestedTurn(script != null);
+          });
       recorder.beforeStep();
       game.runNextStep();
       recorder.afterStep();
@@ -220,6 +244,18 @@ public final class AiMatch {
     result.put("seconds", Math.round(seconds * 10) / 10.0);
     result.put("victory_cities", victoryCities(data));
     result.put("patch_hits_by_side", patchHitsBySide(data, ais, variantBySide.keySet()));
+    final Map<String, List<String>> scriptActions = new TreeMap<>();
+    scripted.forEach((name, ai) -> scriptActions.put(name, ai.getActions()));
+    result.put("script_actions", scriptActions);
+    final long scriptFailures =
+        scriptActions.values().stream()
+            .flatMap(List::stream)
+            .filter(a -> a.contains("FAILED") || a.contains("SKIPPED") || a.contains("only "))
+            .count();
+    result.put("script_failures", scriptFailures);
+    scriptActions.forEach(
+        (name, actions) -> actions.forEach(a -> System.out.println("SCRIPT " + name + " " + a)));
+    System.out.println("SCRIPT_FAILURES " + scriptFailures);
     recorder.finish(result);
     System.out.printf(
         "RESULT map=%s patched=%s patches=%s baselinePatches=%s bid=%s winner=%s winners=%s"
@@ -366,11 +402,20 @@ public final class AiMatch {
       final String label,
       final Set<ProAiPatch> patches,
       final List<ProAi> created,
-      final DecisionLog decisionLog) {
+      final DecisionLog decisionLog,
+      final Set<String> scriptedNames,
+      final Map<String, KataAi> scripted) {
     return new PlayerTypes.Type(label, false) {
       @Override
       public Player newPlayerWithName(final String name) {
-        final ProAi ai = new ProAi(name, getLabel(), patches);
+        final ProAi ai;
+        if (scriptedNames.contains(name)) {
+          final KataAi kataAi = new KataAi(name, patches, patches, null);
+          scripted.put(name, kataAi);
+          ai = kataAi;
+        } else {
+          ai = new ProAi(name, getLabel(), patches);
+        }
         ai.setDecisionListener(decisionLog);
         created.add(ai);
         return ai;
@@ -493,6 +538,25 @@ public final class AiMatch {
     return props;
   }
 
+  /** {@code player:round:file.json,...} to player, round, script. */
+  private static Map<String, Map<Integer, KataScript>> parseScripts(final String value)
+      throws IOException {
+    final Map<String, Map<Integer, KataScript>> scripts = new TreeMap<>();
+    for (final String entry : value.split(",")) {
+      if (entry.isBlank()) {
+        continue;
+      }
+      final String[] parts = entry.trim().split(":", 3);
+      if (parts.length != 3) {
+        throw new IllegalArgumentException("--scripts entry needs player:round:file: " + entry);
+      }
+      scripts
+          .computeIfAbsent(parts[0], k -> new TreeMap<>())
+          .put(Integer.parseInt(parts[1]), KataScript.read(Path.of(parts[2])));
+    }
+    return scripts;
+  }
+
   private static Set<ProAiPatch> parsePatches(final String value) {
     if (value.equalsIgnoreCase("none")) {
       return Set.of();
@@ -524,7 +588,8 @@ public final class AiMatch {
           Map.entry("start", "<export.jsonl>@<round>@<player>"),
           Map.entry("start-list", "<file>"),
           Map.entry("start-key", "<key>"),
-          Map.entry("play-rounds", "<n>"));
+          Map.entry("play-rounds", "<n>"),
+          Map.entry("scripts", "<player:round:file,...>"));
 
   private static String usage() {
     return "Usage: AiMatch "

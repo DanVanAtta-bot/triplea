@@ -47,7 +47,7 @@ public final class KataScript {
     Map<String, Integer> units;
   }
 
-  static KataScript read(final Path file) throws IOException {
+  public static KataScript read(final Path file) throws IOException {
     final KataScript script = new Gson().fromJson(Files.readString(file), KataScript.class);
     if (script == null) {
       throw new IllegalArgumentException("Empty script: " + file);

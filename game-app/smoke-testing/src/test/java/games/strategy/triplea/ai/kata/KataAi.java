@@ -37,17 +37,17 @@ import org.triplea.java.collections.IntegerMap;
  * the Hard AI filling missing phases) and records every purchase, move and placement it makes.
  * After that turn it plays as {@code laterPatches} Hard AI.
  */
-final class KataAi extends ProAi {
+public final class KataAi extends ProAi {
   private final Set<ProAiPatch> turnPatches;
   private final Set<ProAiPatch> laterPatches;
-  private final @Nullable KataScript script;
+  private @Nullable KataScript script;
   private final List<String> actions = new ArrayList<>();
   private boolean testedTurn;
   private String phase = "";
   // Prefix for recorded actions, so scripted ones stand apart from the AI's.
   private String source = "";
 
-  KataAi(
+  public KataAi(
       final String name,
       final Set<ProAiPatch> turnPatches,
       final Set<ProAiPatch> laterPatches,
@@ -58,13 +58,18 @@ final class KataAi extends ProAi {
     this.script = script;
   }
 
+  /** Replaces the script for the next tested turn (null: the variant is the patch set alone). */
+  public void setScript(final @Nullable KataScript script) {
+    this.script = script;
+  }
+
   /** Switches between the variant (tested turn) and the plain follow-up behaviour. */
-  void setTestedTurn(final boolean tested) {
+  public void setTestedTurn(final boolean tested) {
     testedTurn = tested;
     getProData().setPatches(tested ? turnPatches : laterPatches);
   }
 
-  List<String> getActions() {
+  public List<String> getActions() {
     return List.copyOf(actions);
   }
 
