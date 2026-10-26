@@ -10,6 +10,7 @@ dependencies {
     implementation(project(":game-core"))
     testImplementation(project(":game-headless"))
     testImplementation(project(":java-extras"))
+    testImplementation(project(":swing-lib"))
     testImplementation(project(":test-common"))
 }
 

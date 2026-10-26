@@ -13,6 +13,7 @@ import games.strategy.triplea.ai.pro.ProAi;
 import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.EndRoundDelegate;
+import games.strategy.triplea.settings.ClientSetting;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,9 +29,9 @@ import java.util.stream.Collectors;
  * Plays headless all-Hard-AI games where one alliance runs a patched Hard AI and every other player
  * runs the unmodified one. Prints one RESULT line per game.
  *
- * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> --rounds <cap> [--swap]}.
- * {@code --swap} plays a second game with the patched set given to the other alliance (two-alliance
- * maps only).
+ * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> --rounds <cap> [--calc
+ * bounded|concurrent] [--swap]}. {@code --swap} plays a second game with the patched set given to
+ * the other alliance (two-alliance maps only).
  */
 public final class AiMatch {
 
@@ -43,7 +44,14 @@ public final class AiMatch {
     final Set<ProAiPatch> patches = parsePatches(opts.getOrDefault("patches", "NO_OP"));
     final String patchedAlliance = opts.getOrDefault("patched", "Axis");
 
+    final String calc = opts.getOrDefault("calc", "concurrent");
+    if (!List.of("bounded", "concurrent").contains(calc)) {
+      throw new IllegalArgumentException("--calc must be bounded or concurrent: " + calc);
+    }
     GameTestUtils.setUp();
+    // ProAi resolves its static calculator once per JVM, on first use, from this setting.
+    ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
+    System.out.println("CALC " + calc);
     final List<String> orientations = new ArrayList<>(List.of(patchedAlliance));
     if (opts.containsKey("swap")) {
       orientations.add(otherAlliance(map, patchedAlliance));
