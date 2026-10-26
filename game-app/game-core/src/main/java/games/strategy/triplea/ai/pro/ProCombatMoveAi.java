@@ -537,10 +537,7 @@ public class ProCombatMoveAi {
                 patd.getMaxEnemyUnits(),
                 remainingUnitsToDefendWith,
                 enemyAttackOptions.getMax(t).getMaxBombardUnits());
-        final boolean canHold =
-            (!result2.isHasLandUnitRemaining() && !t.isWater())
-                || (result2.getTuvSwing() < 0)
-                || (result2.getWinPercentage() < proData.getMinWinPercentage());
+        final boolean canHold = canHoldAgainstCounterAttack(t, result2);
         patd.setCanHold(canHold);
         ProLogger.debug(
             t
@@ -565,6 +562,23 @@ public class ProCombatMoveAi {
                 + ", averageAttackFromValue="
                 + averageValue);
       }
+    }
+  }
+
+  /** Whether a captured territory holds against the enemy's max counter-attack result. */
+  private boolean canHoldAgainstCounterAttack(
+      final Territory t, final ProBattleResult counterAttack) {
+    final boolean enemyGainsNothing =
+        (!counterAttack.isHasLandUnitRemaining() && !t.isWater())
+            || (counterAttack.getTuvSwing() < 0);
+    final double enemyWinPercentage = counterAttack.getWinPercentage();
+    if (!enemyGainsNothing
+        && enemyWinPercentage < proData.getMinWinPercentage()
+        && enemyWinPercentage >= 100 - proData.getMinWinPercentage()
+        && proData.isPatchOn(ProAiPatch.CAN_HOLD_STRICT)) {
+      return false;
+    } else {
+      return enemyGainsNothing || enemyWinPercentage < proData.getMinWinPercentage();
     }
   }
 
@@ -1087,10 +1101,7 @@ public class ProCombatMoveAi {
               remainingUnitsToDefendWith = unusedUnits;
             }
           }
-          canHold =
-              (!result2.isHasLandUnitRemaining() && !t.isWater())
-                  || (result2.getTuvSwing() < 0)
-                  || (result2.getWinPercentage() < proData.getMinWinPercentage());
+          canHold = canHoldAgainstCounterAttack(t, result2);
           if (result2.getTuvSwing() > 0) {
             enemyCounterTuvSwing = result2.getTuvSwing();
           }
