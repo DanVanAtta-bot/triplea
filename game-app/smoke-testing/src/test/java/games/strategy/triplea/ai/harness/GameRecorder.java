@@ -75,6 +75,8 @@ final class GameRecorder {
   /** Per side, per round accumulators. Losses are attributed to the side that owned the unit. */
   private static final class SideAcc {
     int production;
+    // Player -> unit type -> count bought this round.
+    final Map<String, Map<String, Integer>> bought = new TreeMap<>();
     int otherGain;
     int combatLoss;
     final Map<String, Integer> combatLossByTurn = new TreeMap<>();
@@ -477,6 +479,9 @@ final class GameRecorder {
       }
       if (stepKind.equals("purchase")) {
         side.production += e.getValue().cost();
+        side.bought
+            .computeIfAbsent(e.getValue().owner().getName(), k -> new TreeMap<>())
+            .merge(e.getValue().type(), 1, Integer::sum);
       } else {
         side.otherGain += e.getValue().cost();
       }
@@ -550,6 +555,7 @@ final class GameRecorder {
       r.put("tuv_by_player", tuvByPlayer(now, side));
       r.put("opp_tuv_total", oppTuv);
       r.put("production_tuv", own.production);
+      r.put("bought_by_player", own.bought);
       r.put("pus_spent", own.pusSpent);
       r.put("income", own.income);
       r.put(
