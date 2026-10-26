@@ -265,7 +265,7 @@ public final class AiMatch {
    * constant, which an editable property of the same name shadows on read.
    */
   @SuppressWarnings("unchecked")
-  private static void setProperty(final GameData data, final String name, final String value) {
+  public static void setProperty(final GameData data, final String name, final String value) {
     final Object current = data.getProperties().get(name);
     if (current == null) {
       throw new IllegalArgumentException("No game option named '" + name + "'");
