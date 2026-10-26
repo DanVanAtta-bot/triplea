@@ -23,6 +23,7 @@ import games.strategy.engine.framework.startup.ui.PlayerTypes;
 import games.strategy.engine.player.Player;
 import games.strategy.engine.random.PlainRandomSource;
 import games.strategy.triplea.Constants;
+import games.strategy.triplea.ai.harness.AiMatch;
 import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.attachments.UnitAttachment;
@@ -393,7 +394,7 @@ public final class Kata {
         GameTestUtils.setUpGameWithAis(
             map,
             data -> {
-              data.getProperties().set(Constants.TECH_DEVELOPMENT, false);
+              AiMatch.setProperty(data, Constants.TECH_DEVELOPMENT, "false");
               stepNamed(data, stepName);
             },
             p -> PlayerTypes.PRO_AI);
