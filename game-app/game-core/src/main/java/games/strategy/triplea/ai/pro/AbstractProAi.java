@@ -113,6 +113,20 @@ public abstract class AbstractProAi extends AbstractAi {
   }
 
   /**
+   * Drops the combat and factory move plans that {@link #purchase} stores for the move phases. Call
+   * when something other than this AI made the moves those plans were built for.
+   */
+  protected void discardStoredMovePlans() {
+    storedCombatMoveMap = null;
+    storedFactoryMoveMap = null;
+  }
+
+  /** Drops the placement plan that {@link #purchase} stores for {@link #place}. */
+  protected void discardStoredPurchasePlan() {
+    storedPurchaseTerritories = null;
+  }
+
+  /**
    * Some implementations of {@link IBattleCalculator} do require setting a GameData instance before
    * actually being able to run properly. This method should take care of that.
    */

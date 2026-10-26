@@ -71,6 +71,12 @@ public class GameTestUtils {
         GameParser.parse(xmlFilePath, false)
             .orElseThrow(() -> new RuntimeException("Error parsing file: " + xmlFilePath));
     configure.accept(gameData);
+    return setUpGameWithAis(gameData, playerType);
+  }
+
+  /** Wires AI players onto already-loaded game data, eg: a save game. */
+  public static ServerGame setUpGameWithAis(
+      GameData gameData, Function<GamePlayer, PlayerTypes.Type> playerType) {
     Map<String, PlayerTypes.Type> playerTypes = new HashMap<>();
     for (var player : gameData.getPlayerList().getPlayers()) {
       playerTypes.put(player.getName(), playerType.apply(player));
