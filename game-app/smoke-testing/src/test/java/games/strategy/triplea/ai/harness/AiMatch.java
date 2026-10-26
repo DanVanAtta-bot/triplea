@@ -297,9 +297,11 @@ public final class AiMatch {
       throws IOException {
     final List<ProAi> ais = new ArrayList<>();
     final DecisionLog decisionLog = new DecisionLog();
-    final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais, decisionLog);
+    final PlayerTypes.Type patched =
+        proAiType("Hard AI (patched)", patches, ais, decisionLog, Set.of(), new TreeMap<>());
     final PlayerTypes.Type baseline =
-        proAiType("Hard AI (baseline)", baselinePatches, ais, decisionLog);
+        proAiType(
+            "Hard AI (baseline)", baselinePatches, ais, decisionLog, Set.of(), new TreeMap<>());
     final Map<String, String> options = new TreeMap<>();
     final List<String> optionErrors = new ArrayList<>();
     final long t0 = System.nanoTime();
