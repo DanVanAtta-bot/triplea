@@ -5,6 +5,7 @@ import games.strategy.engine.data.GamePlayer;
 import games.strategy.engine.data.GameTestUtils;
 import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.gameparser.GameParser;
+import games.strategy.engine.data.properties.IEditableProperty;
 import games.strategy.engine.framework.ServerGame;
 import games.strategy.engine.framework.startup.ui.PlayerTypes;
 import games.strategy.engine.player.Player;
@@ -36,10 +37,12 @@ import java.util.stream.Collectors;
  * runs the unmodified one. Prints one RESULT line per game.
  *
  * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> --rounds <cap> [--calc
- * bounded|concurrent] [--swap] [--out <dir>] [--odds-runs <n>] [--flag-combat <tuv>] [--flag-odds
- * <0..1>]}. {@code --swap} plays a second game with the patched set given to the other alliance
- * (two-alliance maps only). Every game writes {@code <out>/<game id>/} with {@code game.json},
- * {@code records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
+ * bounded|concurrent] [--props "Name=value,Name2=value"] [--swap] [--out <dir>] [--odds-runs <n>]
+ * [--flag-combat <tuv>] [--flag-odds <0..1>]}. {@code --swap} plays a second game with the patched
+ * set given to the other alliance (two-alliance maps only). {@code --props} overrides game options
+ * by their exact XML name; Tech Development is always forced off. Every game writes {@code
+ * <out>/<game id>/} with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds;
+ * see {@link GameRecorder}.
  */
 public final class AiMatch {
 
@@ -51,6 +54,8 @@ public final class AiMatch {
     final int roundCap = Integer.parseInt(opts.getOrDefault("rounds", "30"));
     final Set<ProAiPatch> patches = parsePatches(opts.getOrDefault("patches", "NO_OP"));
     final String patchedAlliance = opts.getOrDefault("patched", "Axis");
+    final Map<String, String> props = parseProps(opts.getOrDefault("props", ""));
+    props.put(Constants.TECH_DEVELOPMENT, "false");
 
     final String calc = opts.getOrDefault("calc", "concurrent");
     if (!List.of("bounded", "concurrent").contains(calc)) {
@@ -69,6 +74,7 @@ public final class AiMatch {
     runConfig.put("harness_odds_calc", "concurrent");
     runConfig.put("patches", patches.stream().map(Enum::name).sorted().toList());
     runConfig.put("tech_development", false);
+    runConfig.put("props", props);
     runConfig.put("dice_seed", null);
     runConfig.put("ai_seed", null);
     runConfig.put("engine_commit", git("rev-parse", "HEAD"));
@@ -84,7 +90,7 @@ public final class AiMatch {
       orientations.add(otherAlliance(map, patchedAlliance));
     }
     for (final String alliance : orientations) {
-      playOne(map, roundCap, patches, alliance, outRoot, recorderOptions, runConfig);
+      playOne(map, roundCap, patches, alliance, outRoot, recorderOptions, runConfig, props);
     }
     // Game threads (battle calculator workers etc.) are not all daemons.
     System.exit(0);
@@ -97,7 +103,8 @@ public final class AiMatch {
       final String patchedAlliance,
       final Path outRoot,
       final GameRecorder.Options recorderOptions,
-      final Map<String, Object> runConfig) {
+      final Map<String, Object> runConfig,
+      final Map<String, String> props) {
     final List<ProAi> ais = new ArrayList<>();
     final DecisionLog decisionLog = new DecisionLog();
     final PlayerTypes.Type patched = proAiType("Hard AI (patched)", patches, ais, decisionLog);
@@ -108,7 +115,8 @@ public final class AiMatch {
             map,
             gameData -> {
               requireAlliance(gameData, patchedAlliance);
-              gameData.getProperties().set(Constants.TECH_DEVELOPMENT, false);
+              props.forEach((name, value) -> setProperty(gameData, name, value));
+              System.out.println("PROPS " + props);
             },
             player -> allianceOf(player).equals(patchedAlliance) ? patched : baseline);
     game.setStopGameOnDelegateExecutionStop(true);
@@ -250,6 +258,54 @@ public final class AiMatch {
           "--swap needs exactly two alliances, map has " + alliances);
     }
     return others.get(0);
+  }
+
+  /**
+   * Sets a game option the way the game-options UI does. {@code GameProperties.set} only writes a
+   * constant, which an editable property of the same name shadows on read.
+   */
+  @SuppressWarnings("unchecked")
+  private static void setProperty(final GameData data, final String name, final String value) {
+    final Object current = data.getProperties().get(name);
+    if (current == null) {
+      throw new IllegalArgumentException("No game option named '" + name + "'");
+    }
+    final Object parsed;
+    if (current instanceof Boolean) {
+      if (!List.of("true", "false").contains(value)) {
+        throw new IllegalArgumentException(name + " needs true or false: " + value);
+      }
+      parsed = Boolean.valueOf(value);
+    } else if (current instanceof Integer) {
+      parsed = Integer.valueOf(value);
+    } else {
+      parsed = value;
+    }
+    final IEditableProperty<Object> editable =
+        (IEditableProperty<Object>) data.getProperties().getEditablePropertiesByName().get(name);
+    if (editable != null) {
+      editable.validateAndSet(parsed);
+    } else {
+      data.getProperties().set(name, parsed);
+    }
+    if (!data.getProperties().get(name).equals(parsed)) {
+      throw new IllegalStateException("Game option '" + name + "' did not take " + value);
+    }
+  }
+
+  private static Map<String, String> parseProps(final String value) {
+    final Map<String, String> props = new TreeMap<>();
+    for (final String pair : value.split(",")) {
+      if (pair.isBlank()) {
+        continue;
+      }
+      final int eq = pair.indexOf('=');
+      if (eq < 0) {
+        throw new IllegalArgumentException("--props entry needs Name=value: " + pair);
+      }
+      props.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+    }
+    return props;
   }
 
   private static Set<ProAiPatch> parsePatches(final String value) {
