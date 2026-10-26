@@ -577,9 +577,35 @@ public class ProCombatMoveAi {
         && enemyWinPercentage >= 100 - proData.getMinWinPercentage()
         && proData.isPatchOn(ProAiPatch.CAN_HOLD_STRICT)) {
       return false;
+    } else if (enemyGainsNothing
+        && enemyWinPercentage >= proData.getMinWinPercentage()
+        && !counterAttackLosesEnemyValue(t, counterAttack)
+        && proData.isPatchOn(ProAiPatch.CAN_HOLD_TRADE)) {
+      return false;
     } else {
       return enemyGainsNothing || enemyWinPercentage < proData.getMinWinPercentage();
     }
+  }
+
+  /**
+   * Whether the enemy's counter-attack loses value on average once the territory counts: its TUV
+   * swing plus the chance it retakes the territory times what the territory is worth. The worth
+   * mirrors the attack-value formula for a capture that isn't held. A counter-attack whose average
+   * outcome leaves no land units retakes nothing.
+   */
+  private boolean counterAttackLosesEnemyValue(
+      final Territory t, final ProBattleResult counterAttack) {
+    final int isLand = !t.isWater() ? 1 : 0;
+    final int isFactory = ProMatches.territoryHasInfraFactoryAndIsLand().test(t) ? 1 : 0;
+    final double capitalValue =
+        TerritoryAttachment.get(t).filter(TerritoryAttachment::isCapital).isPresent()
+            ? ProUtils.getPlayerProduction(t.getOwner(), data)
+            : 0;
+    final double territoryValue =
+        (1 + isLand + isFactory) * TerritoryAttachment.getProduction(t) + capitalValue;
+    final double retakePercentage =
+        counterAttack.isHasLandUnitRemaining() ? counterAttack.getWinPercentage() : 0;
+    return counterAttack.getTuvSwing() + territoryValue * retakePercentage / 100 < 0;
   }
 
   private void removeTerritoriesThatArentWorthAttacking(

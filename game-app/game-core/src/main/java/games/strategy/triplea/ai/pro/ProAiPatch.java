@@ -14,4 +14,10 @@ public enum ProAiPatch {
    * minWinPercentage} (75%, dice 65%). Counts a hit only when that flips the judgment.
    */
   CAN_HOLD_STRICT,
+  /**
+   * Combat move no longer counts a captured territory as holdable when the enemy counter-attack
+   * likely wins (at least {@code minWinPercentage}) just because it loses TUV or leaves no land
+   * units. It must lose TUV even after adding the win odds times the territory's worth.
+   */
+  CAN_HOLD_TRADE,
 }
