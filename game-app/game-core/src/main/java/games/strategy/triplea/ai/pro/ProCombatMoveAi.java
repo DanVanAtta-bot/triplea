@@ -32,6 +32,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -41,6 +42,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import org.triplea.java.collections.CollectionUtils;
 
 /** Pro combat move AI. */
@@ -56,6 +58,11 @@ public class ProCombatMoveAi {
   private ProTerritoryManager territoryManager;
   private boolean isDefensive;
   private boolean isBombing;
+  // Measurement only: which rule set canHold, read by reportCombatMovePlan. Never read by
+  // decisions.
+  private final Map<ProTerritory, ProDecisionListener.CanHoldTrace> canHoldTraces =
+      new IdentityHashMap<>();
+  private int canHoldPass;
 
   ProCombatMoveAi(final AbstractProAi ai) {
     this.ai = ai;
@@ -70,6 +77,8 @@ public class ProCombatMoveAi {
     data = proData.getData();
     player = proData.getPlayer();
     territoryManager = new ProTerritoryManager(calc, proData);
+    canHoldTraces.clear();
+    canHoldPass = 0;
 
     // Determine whether capital is threatened, and I should be in a defensive stance
     isDefensive =
@@ -184,12 +193,65 @@ public class ProCombatMoveAi {
                 result == null ? null : result.isHasLandUnitRemaining(),
                 max == null ? null : max.getWinPercentage(),
                 patd.isCanHold(),
-                patd.getValue()));
+                patd.getValue(),
+                result == null || result.getTuvSwing() == -999
+                    ? null
+                    : formulaRuns(patd.getUnits(), patd.getMaxEnemyDefenders(player)),
+                countByType(patd.getMaxEnemyDefenders(player)),
+                canHoldTraces.get(patd)));
       }
       listener.combatMovePlanned(
           player, data.getSequence().getRound(), data != ai.getGameData(), decisions);
     } catch (final RuntimeException e) {
       ProLogger.warn("Decision listener failed: " + e);
+    }
+  }
+
+  private static Map<String, Integer> countByType(final Collection<Unit> units) {
+    final Map<String, Integer> counts = new TreeMap<>();
+    for (final Unit u : units) {
+      counts.merge(u.getType().getName(), 1, Integer::sum);
+    }
+    return counts;
+  }
+
+  /**
+   * The run count ProOddsCalculator.callBattleCalc would use, or null when it would skip the
+   * calculator (no attackers, or no non-infrastructure defenders). Ignores the submerge exit.
+   */
+  @Nullable
+  private static Integer formulaRuns(
+      final Collection<Unit> attackers, final Collection<Unit> defenders) {
+    if (attackers.isEmpty() || defenders.stream().noneMatch(Matches.unitIsNotInfrastructure())) {
+      return null;
+    }
+    return Math.max(16, 100 - Math.min(attackers.size(), defenders.size()));
+  }
+
+  /** Records which rule set canHold, when a listener is attached. Changes no AI state. */
+  private void traceCanHold(
+      final ProTerritory patd,
+      final String branch,
+      @Nullable final ProBattleResult counter,
+      final Collection<Unit> myDefenders,
+      final Collection<Unit> enemyAttackers) {
+    if (ai.getDecisionListener() == null) {
+      return;
+    }
+    try {
+      canHoldTraces.put(
+          patd,
+          new ProDecisionListener.CanHoldTrace(
+              branch,
+              canHoldPass,
+              counter == null ? null : counter.getWinPercentage(),
+              counter == null ? null : counter.getTuvSwing(),
+              counter == null ? null : counter.isHasLandUnitRemaining(),
+              counter == null ? null : formulaRuns(enemyAttackers, myDefenders),
+              myDefenders.size(),
+              enemyAttackers.size()));
+    } catch (final RuntimeException e) {
+      ProLogger.warn("canHold trace failed: " + e);
     }
   }
 
@@ -440,6 +502,7 @@ public class ProCombatMoveAi {
       final List<ProTerritory> prioritizedTerritories, final List<Territory> clearedTerritories) {
 
     ProLogger.info("Check if we should try to hold attack territories");
+    canHoldPass++;
 
     final ProOtherMoveOptions enemyAttackOptions = territoryManager.getEnemyAttackOptions();
     final Map<Territory, ProTerritory> attackMap =
@@ -465,6 +528,7 @@ public class ProCombatMoveAi {
       // If strafing then can't hold
       if (patd.isStrafing()) {
         patd.setCanHold(false);
+        traceCanHold(patd, "strafing", null, List.of(), List.of());
         ProLogger.debug(t + ", strafing so CanHold=false");
         continue;
       }
@@ -495,6 +559,7 @@ public class ProCombatMoveAi {
       final double territoryValue = territoryValueMap.get(t) * (1 + 4.0 * isFactory);
       if (!t.isWater() && territoryValue < averageValue) {
         attackMap.get(t).setCanHold(false);
+        traceCanHold(attackMap.get(t), "not_worth_holding", null, List.of(), List.of());
         ProLogger.debug(
             t
                 + ", CanHold=false, value="
@@ -539,6 +604,17 @@ public class ProCombatMoveAi {
                 enemyAttackOptions.getMax(t).getMaxBombardUnits());
         final boolean canHold = canHoldAgainstCounterAttack(t, result2);
         patd.setCanHold(canHold);
+        final String branch;
+        if (!canHold) {
+          branch = "counter_wins";
+        } else if (!result2.isHasLandUnitRemaining() && !t.isWater()) {
+          branch = "counter_no_land_left";
+        } else if (result2.getTuvSwing() < 0) {
+          branch = "counter_tuv_loss";
+        } else {
+          branch = "counter_win_below_min";
+        }
+        traceCanHold(patd, branch, result2, remainingUnitsToDefendWith, patd.getMaxEnemyUnits());
         ProLogger.debug(
             t
                 + ", CanHold="
@@ -555,6 +631,7 @@ public class ProCombatMoveAi {
                 + result2.isHasLandUnitRemaining());
       } else {
         attackMap.get(t).setCanHold(true);
+        traceCanHold(attackMap.get(t), "no_counter_attackers", null, List.of(), List.of());
         ProLogger.debug(
             t
                 + ", CanHold=true since no enemy counter attackers, value="
