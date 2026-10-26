@@ -174,8 +174,7 @@ final class KataScore {
       final boolean before = side.contains(start.owners().get(name));
       final boolean after = side.contains(end.owners().get(name));
       final int production = TerritoryAttachment.getProduction(t);
-      final int vc =
-          TerritoryAttachment.get(t).map(TerritoryAttachment::getVictoryCity).orElse(0);
+      final int vc = TerritoryAttachment.get(t).map(TerritoryAttachment::getVictoryCity).orElse(0);
       r.sideProductionStart += before ? production : 0;
       r.sideProductionEnd += after ? production : 0;
       r.victoryCitiesStart += before ? vc : 0;
@@ -193,8 +192,7 @@ final class KataScore {
     capitals.forEach(
         (player, caps) -> {
           final boolean held = caps.stream().anyMatch(c -> player.equals(end.owners().get(c)));
-          final String state =
-              held ? (capitalLostDuring.get(player) ? "retaken" : "held") : "lost";
+          final String state = held ? (capitalLostDuring.get(player) ? "retaken" : "held") : "lost";
           r.capitals.put(player + " " + caps, state);
           if (player.equals(testedPlayer)) {
             r.testedCapitalHeld = held && !capitalLostDuring.get(player);

@@ -16,7 +16,6 @@ import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.Unit;
 import games.strategy.engine.data.UnitType;
 import games.strategy.engine.data.changefactory.ChangeFactory;
-import games.strategy.engine.data.gameparser.GameParser;
 import games.strategy.engine.framework.GameDataManager;
 import games.strategy.engine.framework.ServerGame;
 import games.strategy.engine.framework.startup.ui.PlayerTypes;
@@ -92,8 +91,7 @@ public final class Kata {
 
   // ---------------------------------------------------------------- run
 
-  private record Variant(
-      String label, Set<ProAiPatch> patches, @Nullable KataScript script) {}
+  private record Variant(String label, Set<ProAiPatch> patches, @Nullable KataScript script) {}
 
   private static void run(final Map<String, List<String>> opts) throws IOException {
     final Path save = Path.of(required(opts, "save"));
@@ -115,7 +113,8 @@ public final class Kata {
     for (final long seed : seeds) {
       for (final Variant variant : variants) {
         final KataScore.Result r =
-            playOne(save, playerName, one(opts, "step", null), variant, seed, extraRounds, laterSame);
+            playOne(
+                save, playerName, one(opts, "step", null), variant, seed, extraRounds, laterSame);
         printResult(r, playerName);
         results.get(variant.label()).add(r);
       }
@@ -159,8 +158,7 @@ public final class Kata {
           }
         };
     final ServerGame game =
-        GameTestUtils.setUpGameWithAis(
-            data, p -> p.equals(tested) ? kataType : PlayerTypes.PRO_AI);
+        GameTestUtils.setUpGameWithAis(data, p -> p.equals(tested) ? kataType : PlayerTypes.PRO_AI);
     game.setStopGameOnDelegateExecutionStop(true);
     game.setRandomSource(new PlainRandomSource(seed));
     final KataAi ai = kataAis.get(0);
@@ -208,8 +206,8 @@ public final class Kata {
   }
 
   /**
-   * Makes the tested player's turn current: keeps the save's step if it belongs to the player,
-   * else jumps to {@code stepName} (or the player's purchase step) in the current round.
+   * Makes the tested player's turn current: keeps the save's step if it belongs to the player, else
+   * jumps to {@code stepName} (or the player's purchase step) in the current round.
    */
   private static void positionAtTestedTurn(
       final GameData data, final GamePlayer tested, final @Nullable String stepName) {
@@ -251,11 +249,13 @@ public final class Kata {
 
   private static List<GameStep> stepsOf(final GameData data, final GamePlayer player) {
     final List<GameStep> steps = new ArrayList<>();
-    data.getSequence().forEach(s -> {
-      if (player.equals(s.getPlayerId())) {
-        steps.add(s);
-      }
-    });
+    data.getSequence()
+        .forEach(
+            s -> {
+              if (player.equals(s.getPlayerId())) {
+                steps.add(s);
+              }
+            });
     return steps;
   }
 
@@ -267,7 +267,8 @@ public final class Kata {
       final Path file = Path.of(spec.substring(7));
       return new Variant("script:" + file.getFileName(), Set.of(), KataScript.read(file));
     }
-    throw new IllegalArgumentException("Variant must be ai:<patches|none> or script:<file>: " + spec);
+    throw new IllegalArgumentException(
+        "Variant must be ai:<patches|none> or script:<file>: " + spec);
   }
 
   private static Set<ProAiPatch> parsePatches(final String value) {
@@ -275,7 +276,10 @@ public final class Kata {
       return Set.of();
     }
     final Set<ProAiPatch> patches = EnumSet.noneOf(ProAiPatch.class);
-    Arrays.stream(value.split(",")).map(String::trim).map(ProAiPatch::valueOf).forEach(patches::add);
+    Arrays.stream(value.split(","))
+        .map(String::trim)
+        .map(ProAiPatch::valueOf)
+        .forEach(patches::add);
     return patches;
   }
 
@@ -290,13 +294,17 @@ public final class Kata {
         player, r.gapStart, r.gapAfterTurn, r.gapEnd, r.gapDelta, signed(r.gapDeltaByKind));
     System.out.printf(
         "  side TUV %d->%d, enemy TUV %d->%d, side territory production %d->%d%n",
-        r.sideTuvStart, r.sideTuvEnd, r.enemyTuvStart, r.enemyTuvEnd,
-        r.sideProductionStart, r.sideProductionEnd);
+        r.sideTuvStart,
+        r.sideTuvEnd,
+        r.enemyTuvStart,
+        r.enemyTuvEnd,
+        r.sideProductionStart,
+        r.sideProductionEnd);
     System.out.printf(
         "  victory cities %d->%d gained=%s lost=%s%n",
         r.victoryCitiesStart, r.victoryCitiesEnd, r.victoryCitiesGained, r.victoryCitiesLost);
-    System.out.printf("  territories gained=%s%n  territories lost=%s%n",
-        r.territoriesGained, r.territoriesLost);
+    System.out.printf(
+        "  territories gained=%s%n  territories lost=%s%n", r.territoriesGained, r.territoriesLost);
     System.out.printf("  capitals %s%n", r.capitals);
     System.out.println("  actions:");
     r.actions.forEach(a -> System.out.println("    " + a));
@@ -330,8 +338,7 @@ public final class Kata {
       for (final Map.Entry<String, List<KataScore.Result>> e : results.entrySet()) {
         final double[] xs = e.getValue().stream().mapToDouble(m.value()).toArray();
         System.out.printf(
-            "  %s: %7.1f ± %5.1f [%.0f..%.0f]",
-            e.getKey(), mean(xs), sd(xs), min(xs), max(xs));
+            "  %s: %7.1f ± %5.1f [%.0f..%.0f]", e.getKey(), mean(xs), sd(xs), min(xs), max(xs));
       }
       System.out.println();
     }
@@ -416,7 +423,9 @@ public final class Kata {
     game.stopGame();
   }
 
-  /** Edit file: {@code {"owners": {"T": "P"}, "removeUnits": [{"territory", "owner"?, "units"?}]}}. */
+  /**
+   * Edit file: {@code {"owners": {"T": "P"}, "removeUnits": [{"territory", "owner"?, "units"?}]}}.
+   */
   private static void applyEdit(final GameData data, final Path editFile) throws IOException {
     final JsonObject edit = GSON.fromJson(Files.readString(editFile), JsonObject.class);
     final CompositeChange change = new CompositeChange();
@@ -436,7 +445,8 @@ public final class Kata {
         final Territory t = KataAi.territory(data, r.get("territory").getAsString());
         List<Unit> units = new ArrayList<>(t.getUnits());
         if (r.has("owner")) {
-          units.removeIf(Matches.unitIsOwnedBy(player(data, r.get("owner").getAsString())).negate());
+          units.removeIf(
+              Matches.unitIsOwnedBy(player(data, r.get("owner").getAsString())).negate());
         }
         if (r.has("units")) {
           final List<Unit> picked = new ArrayList<>();
@@ -475,18 +485,32 @@ public final class Kata {
     for (final GamePlayer p : data.getPlayerList().getPlayers()) {
       final JsonObject jp = new JsonObject();
       jp.addProperty("pus", p.getResources().getQuantity(pus));
-      jp.add("allies", names(data.getPlayerList().getPlayers().stream()
-          .filter(o -> !o.equals(p) && data.getRelationshipTracker().isAllied(p, o)).toList()));
-      jp.add("atWarWith", names(data.getPlayerList().getPlayers().stream()
-          .filter(o -> data.getRelationshipTracker().isAtWar(p, o)).toList()));
-      jp.add("capitals", strings(TerritoryAttachment.getAllCapitals(p, data.getMap()).stream()
-          .map(Territory::getName).toList()));
+      jp.add(
+          "allies",
+          names(
+              data.getPlayerList().getPlayers().stream()
+                  .filter(o -> !o.equals(p) && data.getRelationshipTracker().isAllied(p, o))
+                  .toList()));
+      jp.add(
+          "atWarWith",
+          names(
+              data.getPlayerList().getPlayers().stream()
+                  .filter(o -> data.getRelationshipTracker().isAtWar(p, o))
+                  .toList()));
+      jp.add(
+          "capitals",
+          strings(
+              TerritoryAttachment.getAllCapitals(p, data.getMap()).stream()
+                  .map(Territory::getName)
+                  .toList()));
       jp.add("unitsToPlace", countByType(p.getUnits()));
       if (p.getProductionFrontier() != null) {
         final JsonObject buy = new JsonObject();
         for (final ProductionRule rule : p.getProductionFrontier().getRules()) {
           final String result =
-              rule.getResults().keySet().stream().map(r -> r.getName()).collect(Collectors.joining("+"));
+              rule.getResults().keySet().stream()
+                  .map(r -> r.getName())
+                  .collect(Collectors.joining("+"));
           buy.addProperty(result, rule.getCosts().getInt(pus));
         }
         jp.add("buy", buy);
@@ -527,11 +551,15 @@ public final class Kata {
                 }
                 ta.getCapital().ifPresent(c -> jt.addProperty("capitalOf", c));
               });
-      jt.add("neighbors", strings(data.getMap().getNeighbors(t).stream()
-          .map(Territory::getName).sorted().toList()));
+      jt.add(
+          "neighbors",
+          strings(
+              data.getMap().getNeighbors(t).stream().map(Territory::getName).sorted().toList()));
       final JsonObject units = new JsonObject();
       final Map<String, List<Unit>> byOwner = new TreeMap<>();
-      t.getUnits().forEach(u -> byOwner.computeIfAbsent(u.getOwner().getName(), k -> new ArrayList<>()).add(u));
+      t.getUnits()
+          .forEach(
+              u -> byOwner.computeIfAbsent(u.getOwner().getName(), k -> new ArrayList<>()).add(u));
       byOwner.forEach((owner, us) -> units.add(owner, countByType(us)));
       jt.add("units", units);
       territories.add(jt);
@@ -577,7 +605,9 @@ public final class Kata {
     final GamePlayer p = data.getPlayerList().getPlayerId(name);
     if (p == null) {
       throw new IllegalArgumentException(
-          "No player " + name + "; players: "
+          "No player "
+              + name
+              + "; players: "
               + data.getPlayerList().getPlayers().stream().map(GamePlayer::getName).toList());
     }
     return p;

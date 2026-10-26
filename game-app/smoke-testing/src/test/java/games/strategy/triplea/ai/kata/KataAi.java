@@ -176,7 +176,8 @@ final class KataAi extends ProAi {
           final List<Unit> candidates =
               from.getUnitCollection()
                   .getMatches(
-                      Matches.unitIsOwnedBy(player).and(Matches.unitIsOfType(unitType(data, type))));
+                      Matches.unitIsOwnedBy(player)
+                          .and(Matches.unitIsOfType(unitType(data, type))));
           candidates.removeAll(units);
           candidates.sort(Comparator.comparing(Unit::getMovementLeft).reversed());
           units.addAll(candidates.subList(0, Math.min(count, candidates.size())));
@@ -200,7 +201,8 @@ final class KataAi extends ProAi {
     if (route.get().isSeaLoad()) {
       transports =
           TransportUtils.mapTransportsToLoad(
-              units, route.get().getEnd().getUnitCollection().getMatches(Matches.unitIsOwnedBy(player)));
+              units,
+              route.get().getEnd().getUnitCollection().getMatches(Matches.unitIsOwnedBy(player)));
     } else if (route.get().isSeaUnload()) {
       transports = TransportUtils.mapTransportsAlreadyLoaded(units, from.getUnits());
     } else {
@@ -216,8 +218,7 @@ final class KataAi extends ProAi {
       final GameData data,
       final GamePlayer player) {
     if (move.route != null) {
-      final List<Territory> path =
-          move.route.stream().map(name -> territory(data, name)).toList();
+      final List<Territory> path = move.route.stream().map(name -> territory(data, name)).toList();
       if (!path.get(0).equals(from)) {
         throw new IllegalArgumentException("route must start at 'from': " + move.route);
       }
@@ -268,9 +269,10 @@ final class KataAi extends ProAi {
                             "%s: %s %s%s",
                             phase,
                             units(((MoveDescription) args[0]).getUnits()),
-                            ((MoveDescription) args[0]).getRoute().getAllTerritories().stream()
-                                .map(Territory::getName)
-                                .collect(Collectors.joining(" -> ")),
+                            ((MoveDescription) args[0])
+                                .getRoute().getAllTerritories().stream()
+                                    .map(Territory::getName)
+                                    .collect(Collectors.joining(" -> ")),
                             outcome(result)));
                 case "placeUnits" ->
                     record(
@@ -334,7 +336,10 @@ final class KataAi extends ProAi {
         .orElseThrow(
             () ->
                 new IllegalArgumentException(
-                    player.getName() + " cannot buy " + unit + "; frontier has "
+                    player.getName()
+                        + " cannot buy "
+                        + unit
+                        + "; frontier has "
                         + player.getProductionFrontier().getRules().stream()
                             .map(ProductionRule::getName)
                             .toList()));
