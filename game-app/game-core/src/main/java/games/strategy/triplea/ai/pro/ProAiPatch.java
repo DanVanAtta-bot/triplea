@@ -20,4 +20,10 @@ public enum ProAiPatch {
    * units. It must lose TUV even after adding the win odds times the territory's worth.
    */
   CAN_HOLD_TRADE,
+  /**
+   * Simulates every battle at least {@code ProOddsCalculator.ODDS_MORE_RUNS_FLOOR} times. Stock
+   * runs {@code max(16, 100 - smaller army)}, so big battles get the fewest runs and their win%
+   * noise straddles the 75%/95% cutoffs.
+   */
+  ODDS_MORE_RUNS,
 }
