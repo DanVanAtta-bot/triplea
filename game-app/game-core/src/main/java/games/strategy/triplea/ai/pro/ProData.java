@@ -14,6 +14,8 @@ import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.util.TuvCostsCalculator;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -45,6 +47,30 @@ public final class ProData {
   private AbstractProAi proAi;
   private GameData data;
   private GamePlayer player;
+
+  private final Set<ProAiPatch> patches;
+  // How often each enabled patch's gate was hit; a patch that never fires cannot change results.
+  private final Map<ProAiPatch, Integer> patchHits = new EnumMap<>(ProAiPatch.class);
+
+  public ProData() {
+    this(Set.of());
+  }
+
+  public ProData(final Collection<ProAiPatch> patches) {
+    this.patches = Set.copyOf(patches);
+  }
+
+  public boolean isPatchOn(final ProAiPatch patch) {
+    if (!patches.contains(patch)) {
+      return false;
+    }
+    patchHits.merge(patch, 1, Integer::sum);
+    return true;
+  }
+
+  public Map<ProAiPatch, Integer> getPatchHits() {
+    return Map.copyOf(patchHits);
+  }
 
   public void initialize(final AbstractProAi proAi) {
     hiddenInitialize(proAi, proAi.getGameData(), proAi.getGamePlayer(), false);

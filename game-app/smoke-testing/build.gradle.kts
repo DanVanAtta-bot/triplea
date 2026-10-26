@@ -46,3 +46,14 @@ tasks.named<ProcessResources>("processTestResources") {
         into("save-games")
     }
 }
+
+// AI-improvement harness: plays patched-vs-baseline Hard AI games.
+// ./gradlew :smoke-testing:aiMatch --args="--map big_world_1942.xml --patched Axis --patches NO_OP --rounds 30 --swap"
+tasks.register<JavaExec>("aiMatch") {
+    group = "application"
+    description = "Plays headless Hard AI games, one alliance patched, the rest baseline."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("games.strategy.triplea.ai.harness.AiMatch")
+    workingDir = projectDir
+    maxHeapSize = "3G"
+}

@@ -26,7 +26,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "triplea"
+rootProject.name = "triplea-ai-harness"
 
 include(":ai")
 project(":ai").projectDir = file("game-app/ai")

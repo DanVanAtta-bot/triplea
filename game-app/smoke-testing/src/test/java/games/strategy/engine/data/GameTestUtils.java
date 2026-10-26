@@ -20,6 +20,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +50,17 @@ public class GameTestUtils {
   }
 
   public static ServerGame setUpGameWithAis(String xmlName) {
+    return setUpGameWithAis(xmlName, gameData -> {}, player -> PlayerTypes.PRO_AI);
+  }
+
+  /**
+   * Like {@link #setUpGameWithAis(String)}, but lets the caller adjust the parsed game (eg: game
+   * properties) before it starts and pick the AI type of each player.
+   */
+  public static ServerGame setUpGameWithAis(
+      String xmlName,
+      Consumer<GameData> configure,
+      Function<GamePlayer, PlayerTypes.Type> playerType) {
     Path xmlFilePath = Path.of("src", "test", "resources", "map-xmls", xmlName);
     if (!Files.exists(xmlFilePath)) {
       throw new IllegalStateException(
@@ -57,9 +70,10 @@ public class GameTestUtils {
     GameData gameData =
         GameParser.parse(xmlFilePath, false)
             .orElseThrow(() -> new RuntimeException("Error parsing file: " + xmlFilePath));
+    configure.accept(gameData);
     Map<String, PlayerTypes.Type> playerTypes = new HashMap<>();
     for (var player : gameData.getPlayerList().getPlayers()) {
-      playerTypes.put(player.getName(), PlayerTypes.PRO_AI);
+      playerTypes.put(player.getName(), playerType.apply(player));
     }
     Set<Player> gamePlayers = gameData.getGameLoader().newPlayers(playerTypes);
     HeadlessLaunchAction launchAction = new HeadlessLaunchAction(mock(HeadlessGameServer.class));
