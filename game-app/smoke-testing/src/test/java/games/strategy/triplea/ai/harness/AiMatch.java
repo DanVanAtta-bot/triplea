@@ -505,19 +505,56 @@ public final class AiMatch {
     return patches;
   }
 
+  /** Every flag main() reads, with its value placeholder; an empty placeholder takes no value. */
+  private static final Map<String, String> FLAGS =
+      Map.ofEntries(
+          Map.entry("map", "<xml>"),
+          Map.entry("patched", "<alliance>"),
+          Map.entry("patches", "<P1,P2|none>"),
+          Map.entry("baseline-patches", "<P1,P2|none>"),
+          Map.entry("rounds", "<cap>"),
+          Map.entry("calc", "bounded|concurrent"),
+          Map.entry("props", "\"Name=value,...\""),
+          Map.entry("bid", "<file.bid.json>"),
+          Map.entry("swap", ""),
+          Map.entry("out", "<dir>"),
+          Map.entry("odds-runs", "<n>"),
+          Map.entry("flag-combat", "<tuv>"),
+          Map.entry("flag-odds", "<0..1>"),
+          Map.entry("start", "<export.jsonl>@<round>@<player>"),
+          Map.entry("start-list", "<file>"),
+          Map.entry("start-key", "<key>"),
+          Map.entry("play-rounds", "<n>"));
+
+  private static String usage() {
+    return "Usage: AiMatch "
+        + new TreeMap<>(FLAGS)
+            .entrySet().stream()
+                .map(
+                    e ->
+                        "[--"
+                            + e.getKey()
+                            + (e.getValue().isEmpty() ? "" : " " + e.getValue())
+                            + "]")
+                .collect(Collectors.joining(" "));
+  }
+
   private static Map<String, String> parseArgs(final String[] args) {
     final Map<String, String> opts = new TreeMap<>();
     for (int i = 0; i < args.length; i++) {
       if (!args[i].startsWith("--")) {
-        throw new IllegalArgumentException("Unexpected argument: " + args[i]);
+        throw new IllegalArgumentException("Unexpected argument: " + args[i] + "\n" + usage());
       }
       final String key = args[i].substring(2);
-      if (key.equals("swap")) {
+      if (!FLAGS.containsKey(key)) {
+        throw new IllegalArgumentException("Unknown flag: --" + key + "\n" + usage());
+      }
+      if (FLAGS.get(key).isEmpty()) {
         opts.put(key, "true");
       } else if (i + 1 < args.length) {
         opts.put(key, args[++i]);
       } else {
-        throw new IllegalArgumentException("Missing value for --" + key);
+        throw new IllegalArgumentException("Missing value for --" + key + "\n" + usage());
       }
     }
     return opts;
