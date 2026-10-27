@@ -93,10 +93,13 @@ class SurvivorMapper {
 
   /** A side's survivor total: every non-DEAD bucket (ACTIVE plus WITHDRAWN units count). */
   private static int survivorCount(final Force force) {
-    return force.counts().entrySet().stream()
-        .filter(entry -> entry.getKey().state() != Lifecycle.DEAD)
-        .mapToInt(Map.Entry::getValue)
-        .sum();
+    int count = 0;
+    for (final Map.Entry<Key, Integer> entry : force.counts().entrySet()) {
+      if (entry.getKey().state() != Lifecycle.DEAD) {
+        count += entry.getValue();
+      }
+    }
+    return count;
   }
 
   /**

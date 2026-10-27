@@ -7,6 +7,7 @@ import games.strategy.engine.data.UnitType;
 import games.strategy.triplea.odds.calculator.AggregateResults;
 import games.strategy.triplea.odds.calculator.context.model.BattleResult;
 import games.strategy.triplea.odds.calculator.context.model.Force;
+import games.strategy.triplea.odds.calculator.context.model.Key;
 import games.strategy.triplea.odds.calculator.context.model.Lifecycle;
 import games.strategy.triplea.odds.calculator.context.model.Outcome;
 import games.strategy.triplea.odds.calculator.context.model.SimulationResults;
@@ -160,10 +161,13 @@ public class BoundedContextAggregateResults extends AggregateResults {
   }
 
   private static int survivorCount(final Force force) {
-    return force.counts().entrySet().stream()
-        .filter(entry -> entry.getKey().state() != Lifecycle.DEAD)
-        .mapToInt(Map.Entry::getValue)
-        .sum();
+    int count = 0;
+    for (final Map.Entry<Key, Integer> entry : force.counts().entrySet()) {
+      if (entry.getKey().state() != Lifecycle.DEAD) {
+        count += entry.getValue();
+      }
+    }
+    return count;
   }
 
   /** Re-keys an engine {@code UnitType -> cost} schedule onto the calc's {@link UnitTypeId}. */
