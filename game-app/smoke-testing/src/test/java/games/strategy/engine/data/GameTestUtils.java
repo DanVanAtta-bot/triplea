@@ -135,8 +135,8 @@ public class GameTestUtils {
 
   /**
    * A launch action with no headless server behind it. Only a server-side launcher calls the two
-   * methods that would reach the server. Replaces a Mockito mock, whose agent self-attach cost
-   * ~0.8 s per JVM.
+   * methods that would reach the server. Replaces a Mockito mock, whose agent self-attach cost ~0.8
+   * s per JVM.
    */
   private static final class NoServerLaunchAction extends HeadlessLaunchAction {
     NoServerLaunchAction() {
