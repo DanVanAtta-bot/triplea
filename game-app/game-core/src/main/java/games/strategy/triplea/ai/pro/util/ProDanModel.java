@@ -370,9 +370,10 @@ public class ProDanModel {
   }
 
   /**
-   * Per enemy power E: production each side delivers to E's territories (income split among a
-   * power's fronts by 0.6^delay), net TUV traded with E over the last 2 rounds per round, and the
-   * pin balance (TUV my pins hold of E's minus what they cost, against the same for E's pins).
+   * Per enemy power E: production each side delivers to the contact line between E and my alliance
+   * (each power's income split among the fronts by 0.6^delay, then discounted by 0.6^delay), net
+   * TUV traded with E over the last 2 rounds per round, and the pin balance (TUV my pins hold of
+   * E's minus what they cost, against the same for E's pins).
    */
   static Map<String, Front> fronts(
       final GameData data,
@@ -381,50 +382,49 @@ public class ProDanModel {
       final List<GamePlayer> enemies,
       final int round,
       final boolean pinsOn) {
-    final Map<GamePlayer, Map<GamePlayer, Double>> weights = new HashMap<>();
+    final GameMap map = data.getMap();
     final List<GamePlayer> everyone = new ArrayList<>(alliance);
     everyone.addAll(enemies);
-    final Map<GamePlayer, Map<Territory, Integer>> landFromFront = new HashMap<>();
-    final Map<GamePlayer, Map<Territory, Integer>> anyFromFront = new HashMap<>();
-    for (final GamePlayer e : everyone) {
-      final List<Territory> zone =
-          data.getMap().getTerritoriesOwnedBy(e).stream().filter(t -> !t.isWater()).toList();
-      landFromFront.put(e, bfs(data.getMap(), zone, 99, t -> !t.isWater()));
-      anyFromFront.put(e, bfs(data.getMap(), zone, 99, t -> true));
+    final Map<GamePlayer, Map<GamePlayer, Double>> weights = new HashMap<>();
+    for (final GamePlayer x : everyone) {
+      weights.put(x, new HashMap<>());
     }
-    for (final GamePlayer p : everyone) {
-      final Map<GamePlayer, Double> w = new HashMap<>();
-      for (final GamePlayer e : everyone) {
-        if (data.getRelationshipTracker().isAllied(p, e) || p.equals(e)) {
+    for (final GamePlayer e : enemies) {
+      final List<Territory> zone = new ArrayList<>();
+      for (final Territory t : map.getTerritories()) {
+        if (t.isWater()) {
           continue;
         }
-        final int delay = delay(data, p, landFromFront.get(e), anyFromFront.get(e));
-        w.put(e, delay > MAX_DELAY ? 0 : Math.pow(DELAY_DISCOUNT, delay));
+        final Predicate<Territory> other =
+            e.equals(t.getOwner())
+                ? n -> !n.isWater() && alliance.contains(n.getOwner())
+                : n -> !n.isWater() && e.equals(n.getOwner());
+        if ((e.equals(t.getOwner()) || alliance.contains(t.getOwner()))
+            && map.getNeighbors(t).stream().anyMatch(other)) {
+          zone.add(t);
+        }
       }
-      weights.put(p, w);
+      if (zone.isEmpty()) {
+        zone.addAll(map.getTerritoriesOwnedBy(e).stream().filter(t -> !t.isWater()).toList());
+      }
+      final Map<Territory, Integer> land = bfs(map, zone, 99, t -> !t.isWater());
+      final Map<Territory, Integer> any = bfs(map, zone, 99, t -> true);
+      for (final GamePlayer x : everyone) {
+        final int delay = delay(data, x, land, any);
+        weights.get(x).put(e, delay > MAX_DELAY ? 0 : Math.pow(DELAY_DISCOUNT, delay));
+      }
     }
     final Pins mine = pinsOn ? pins(data, alliance, enemies) : null;
     final Pins theirs = pinsOn ? pins(data, enemies, alliance) : null;
     final Map<String, Front> fronts = new HashMap<>();
     for (final GamePlayer e : enemies) {
       double prodMine = 0;
-      for (final GamePlayer p : alliance) {
-        prodMine += delivered(data, p, e, weights.get(p));
+      for (final GamePlayer x : alliance) {
+        prodMine += delivered(data, x, e, weights.get(x));
       }
       double prodTheirs = 0;
-      for (final GamePlayer q : enemies) {
-        if (q.equals(e)) {
-          prodTheirs += ProUtils.getPlayerProduction(e, data);
-        } else if (data.getRelationshipTracker().isAllied(q, e)) {
-          // E's allies deliver to E's front what they deliver against me there
-          final Map<GamePlayer, Double> w = weights.get(q);
-          final double total = w.values().stream().mapToDouble(Double::doubleValue).sum();
-          final int delay = delay(data, q, landFromFront.get(e), anyFromFront.get(e));
-          final double own = delay > MAX_DELAY ? 0 : Math.pow(DELAY_DISCOUNT, delay);
-          if (total + own > 0) {
-            prodTheirs += ProUtils.getPlayerProduction(q, data) * own * own / (total + own);
-          }
-        }
+      for (final GamePlayer x : enemies) {
+        prodTheirs += delivered(data, x, e, weights.get(x));
       }
       double eLost = 0;
       double myLost = 0;
