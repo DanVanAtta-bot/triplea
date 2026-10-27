@@ -1,7 +1,5 @@
 package games.strategy.engine.data;
 
-import static org.mockito.Mockito.mock;
-
 import games.strategy.engine.ClientFileSystemHelper;
 import games.strategy.engine.data.gameparser.GameParser;
 import games.strategy.engine.framework.GameRunner;
@@ -26,7 +24,6 @@ import java.util.function.Predicate;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.sonatype.goodies.prefs.memory.MemoryPreferences;
-import org.triplea.game.server.HeadlessGameServer;
 import org.triplea.game.server.HeadlessLaunchAction;
 import org.triplea.io.FileUtils;
 import org.triplea.java.collections.CollectionUtils;
@@ -82,7 +79,7 @@ public class GameTestUtils {
       playerTypes.put(player.getName(), playerType.apply(player));
     }
     Set<Player> gamePlayers = gameData.getGameLoader().newPlayers(playerTypes);
-    HeadlessLaunchAction launchAction = new HeadlessLaunchAction(mock(HeadlessGameServer.class));
+    HeadlessLaunchAction launchAction = new NoServerLaunchAction();
     Messengers messengers = new Messengers(new LocalNoOpMessenger());
     ServerGame game =
         new ServerGame(
@@ -134,5 +131,22 @@ public class GameTestUtils {
 
   public static Territory getTerritory(GameData data, String name) {
     return Optional.ofNullable(data.getMap().getTerritoryOrNull(name)).orElseThrow();
+  }
+
+  /**
+   * A launch action with no headless server behind it. Only a server-side launcher calls the two
+   * methods that would reach the server. Replaces a Mockito mock, whose agent self-attach cost
+   * ~0.8 s per JVM.
+   */
+  private static final class NoServerLaunchAction extends HeadlessLaunchAction {
+    NoServerLaunchAction() {
+      super(null);
+    }
+
+    @Override
+    public void onGameInterrupt() {}
+
+    @Override
+    public void onLaunch(final ServerGame serverGame) {}
   }
 }

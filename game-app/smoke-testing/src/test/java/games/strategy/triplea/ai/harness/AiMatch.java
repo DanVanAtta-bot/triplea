@@ -43,7 +43,7 @@ import javax.annotation.Nullable;
  *
  * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> [--baseline-patches
  * <P1,P2|none>] --rounds <cap> [--calc bounded|concurrent] [--props "Name=value,Name2=value"]
- * [--bid <file.bid.json>] [--swap] [--out <dir>] [--odds-runs <n>] [--recorder-odds
+ * [--bid <file.bid.json>] [--swap] [--repeat <n>] [--out <dir>] [--odds-runs <n>] [--recorder-odds
  * concurrent|bounded|off] [--flag-combat <tuv>] [--flag-odds <0..1>] [--scripts
  * <player:round:file.json,...>]}. {@code --scripts} plays that player's turn of that round from a
  * kata script (see {@link KataScript}; phases the script leaves out, and every other turn, are the
@@ -54,7 +54,10 @@ import javax.annotation.Nullable;
  * game.json}, {@code records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
  * {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early, won by the side that has
  * been decisively ahead for that many round ends (see {@link DecisiveRule}); it prints a DECISIVE
- * line before RESULT, and RESULT shows the game as that side's win.
+ * line before RESULT, and RESULT shows the game as that side's win. {@code --repeat <n>} plays the
+ * whole set (one game, or two with {@code --swap}) n times in this JVM, so later games run on
+ * JIT-compiled code; each game prints its own RESULT, then a GAME_CPU line with the process CPU
+ * seconds it used.
  *
  * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
  * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
@@ -116,9 +119,11 @@ public final class AiMatch {
     System.out.println("BID " + (bid == null ? "none" : bid.summary()));
     System.out.println("SCRIPTS " + opts.getOrDefault("scripts", "none"));
     System.out.println("DECISIVE_RULE " + (decisive == null ? "off" : decisive));
+    final int repeat = Integer.parseInt(opts.getOrDefault("repeat", "1"));
     if (opts.containsKey("start") || opts.containsKey("start-list")) {
-      if (bid != null || opts.containsKey("swap")) {
-        throw new IllegalArgumentException("--bid and --swap don't apply to a human start");
+      if (bid != null || opts.containsKey("swap") || repeat != 1) {
+        throw new IllegalArgumentException(
+            "--bid, --swap and --repeat don't apply to a human start");
       }
       final String spec =
           opts.containsKey("start")
@@ -142,20 +147,27 @@ public final class AiMatch {
     if (opts.containsKey("swap")) {
       orientations.add(otherAlliance(map, patchedAlliance));
     }
-    for (final String alliance : orientations) {
-      playOne(
-          map,
-          roundCap,
-          patches,
-          baselinePatches,
-          bid,
-          alliance,
-          outRoot,
-          recorderOptions,
-          runConfig,
-          props,
-          scripts,
-          decisive);
+    final com.sun.management.OperatingSystemMXBean os =
+        (com.sun.management.OperatingSystemMXBean)
+            java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+    for (int i = 0; i < repeat; i++) {
+      for (final String alliance : orientations) {
+        final long cpu0 = os.getProcessCpuTime();
+        playOne(
+            map,
+            roundCap,
+            patches,
+            baselinePatches,
+            bid,
+            alliance,
+            outRoot,
+            recorderOptions,
+            runConfig,
+            props,
+            scripts,
+            decisive);
+        System.out.printf("GAME_CPU seconds=%.1f%n", (os.getProcessCpuTime() - cpu0) / 1e9);
+      }
     }
     // Game threads (battle calculator workers etc.) are not all daemons.
     System.exit(0);
@@ -665,6 +677,7 @@ public final class AiMatch {
           Map.entry("props", "\"Name=value,...\""),
           Map.entry("bid", "<file.bid.json>"),
           Map.entry("swap", ""),
+          Map.entry("repeat", "<n>"),
           Map.entry("out", "<dir>"),
           Map.entry("odds-runs", "<n>"),
           Map.entry("recorder-odds", "concurrent|bounded|off"),
