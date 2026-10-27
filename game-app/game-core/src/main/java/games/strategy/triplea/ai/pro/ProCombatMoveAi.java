@@ -535,7 +535,7 @@ public class ProCombatMoveAi {
     final List<ProTerritory> candidates = new ArrayList<>();
     final boolean anyTarget = proData.getPatches().contains(ProAiPatch.ATTACK_READD_DROPPED);
     for (final ProTerritory patd : removedBySelection) {
-      if ((anyTarget || patd.isNeedAmphibUnits())
+      if ((anyTarget || (patd.isNeedAmphibUnits() && isReaddWorthy(patd)))
           && !patd.getTerritory().isWater()
           && !dropped.contains(patd)
           && !attackOptions.contains(patd)
@@ -687,6 +687,17 @@ public class ProCombatMoveAi {
         }
       }
     }
+  }
+
+  /**
+   * A re-added landing must be worth its transports: an enemy capital or factory, or a target the
+   * combat move expects to hold: a small landing the enemy retakes costs more than it takes.
+   */
+  private static boolean isReaddWorthy(final ProTerritory patd) {
+    final Territory t = patd.getTerritory();
+    return TerritoryAttachment.get(t).map(TerritoryAttachment::isCapital).orElse(false)
+        || ProMatches.territoryHasInfraFactoryAndIsLand().test(t)
+        || patd.isCanHold();
   }
 
   /** The success test of {@link #determineTerritoriesToAttack} for the current assignment. */

@@ -166,12 +166,13 @@ public enum ProAiPatch {
    */
   NCM_DEFENSIVE_STANCE_FIX,
   /**
-   * Combat move: once the worth-it check has dropped an attack, retries the amphibious attacks that
-   * target selection removed while that attack was still planned, in attack-value order, highest
-   * value first, keeping each one only if every planned attack still succeeds. Stock removes the
-   * newest target whenever the set fails, even when the failing target is an earlier one that is
-   * later dropped, so the freed units and transports idle (eg: a capital in reach of loaded
-   * transports is skipped for a doomed attack on another capital).
+   * Combat move: once the worth-it check has dropped an attack, retries the amphibious attacks on
+   * enemy capitals, factories or holdable targets that target selection removed while that attack
+   * was still planned, in attack-value order, highest value first, keeping each one only if every
+   * planned attack still succeeds. Stock removes the newest target whenever the set fails, even
+   * when the failing target is an earlier one that is later dropped, so the freed units and
+   * transports idle (eg: a capital in reach of loaded transports is skipped for a doomed attack on
+   * another capital).
    */
   AMPHIB_READD_DROPPED,
   /**
