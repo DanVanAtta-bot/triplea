@@ -1468,8 +1468,11 @@ class ProPurchaseAi {
       if (proData.hasPatch(ProAiPatch.DAN_PINS)
           && fodderPercent < PAD_FODDER_PERCENT
           && territoryManager.getEnemyAttackOptions().getMax(t) != null
+          && territoryManager.getEnemyAttackOptions().getMax(t).getMaxUnits().stream()
+              .anyMatch(Matches.unitIsAir())
           && proData.isPatchOn(ProAiPatch.DAN_PINS)) {
-        // A stack the enemy can attack but not take: pad it with cheap hit points
+        // A stack that holds but that enemy air can strafe: pad it with cheap hit points, so a
+        // strafe trades fighters for infantry
         fodderPercent = PAD_FODDER_PERCENT;
       }
       ProLogger.debug(t + ", enemyDistance=" + enemyDistance + ", fodderPercent=" + fodderPercent);
