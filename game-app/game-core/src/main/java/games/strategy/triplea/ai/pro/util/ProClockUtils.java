@@ -57,6 +57,69 @@ public class ProClockUtils {
       final Mix mix,
       final boolean attackersBuyNow,
       final int maxRounds) {
+    return timeToKill(data, attackers, capital, mix, attackersBuyNow, maxRounds, Set.of());
+  }
+
+  /** Like the 6-arg version, but the {@code pinned} units never join the attack. */
+  public static int timeToKill(
+      final GameData data,
+      final Collection<GamePlayer> attackers,
+      final Territory capital,
+      final Mix mix,
+      final boolean attackersBuyNow,
+      final int maxRounds,
+      final Set<Unit> pinned) {
+    final Curves c = curves(data, attackers, capital, mix, attackersBuyNow, maxRounds, pinned);
+    double a = 0;
+    double d = c.defence[0];
+    for (int t = 1; t <= maxRounds; t++) {
+      a += c.attack[t];
+      d += c.defence[t];
+      if (a + c.attackPerPu[t] >= RATIO * (d + t * c.defencePerTurn)) {
+        return t;
+      }
+    }
+    return NONE;
+  }
+
+  /**
+   * Defensive strength the capital's owner must add this turn so that no round up to {@code rounds}
+   * is a kill, if it buys its best defence at the capital on every later turn. 0 if none is needed.
+   * Strength is 2 x hit points + defence, as the clock counts it.
+   */
+  public static double defenceDeficit(
+      final GameData data,
+      final Collection<GamePlayer> attackers,
+      final Territory capital,
+      final int rounds,
+      final Set<Unit> pinned) {
+    double deficit = 0;
+    for (final Mix mix : Mix.values()) {
+      final Curves c = curves(data, attackers, capital, mix, false, rounds, pinned);
+      double a = 0;
+      double d = c.defence[0];
+      for (int t = 1; t <= rounds; t++) {
+        a += c.attack[t];
+        d += c.defence[t];
+        deficit =
+            Math.max(deficit, (a + c.attackPerPu[t]) / RATIO - (d + (t - 1) * c.defencePerTurn));
+      }
+    }
+    return deficit;
+  }
+
+  /** Per-round strength the attackers add and the defence can add, as the clock counts them. */
+  private record Curves(
+      double[] attack, double[] attackPerPu, double[] defence, double defencePerTurn) {}
+
+  private static Curves curves(
+      final GameData data,
+      final Collection<GamePlayer> attackers,
+      final Territory capital,
+      final Mix mix,
+      final boolean attackersBuyNow,
+      final int maxRounds,
+      final Set<Unit> pinned) {
     final GamePlayer owner = capital.getOwner();
     final GameMap map = data.getMap();
     final Map<Territory, Integer> land =
@@ -83,7 +146,7 @@ public class ProClockUtils {
         final int move = Math.max(1, ua.getMovement(o));
         final boolean air = Matches.unitIsAir().test(u);
         if (attackers.contains(o)) {
-          if (t.equals(capital)) {
+          if (t.equals(capital) || pinned.contains(u)) {
             continue;
           }
           final int arrival;
@@ -106,7 +169,7 @@ public class ProClockUtils {
         }
       }
     }
-    addAmphibious(data, attackers, land, landArrival, attack);
+    addAmphibious(data, attackers, land, landArrival, attack, pinned);
 
     // Buys
     final Resource pus = data.getResourceList().getResourceOrThrow(Constants.PUS);
@@ -137,16 +200,7 @@ public class ProClockUtils {
     }
     final double defencePerTurn = bestDefenceBuy(owner, data, capital);
 
-    double a = 0;
-    double d = defence[0];
-    for (int t = 1; t <= maxRounds; t++) {
-      a += attack[t];
-      d += defence[t];
-      if (a + attackPerPu[t] >= RATIO * (d + t * defencePerTurn)) {
-        return t;
-      }
-    }
-    return NONE;
+    return new Curves(attack, attackPerPu, defence, defencePerTurn);
   }
 
   /** The shortest clock over both mixes. */
@@ -171,7 +225,8 @@ public class ProClockUtils {
       final Collection<GamePlayer> attackers,
       final Map<Territory, Integer> land,
       final Map<Unit, Integer> landArrival,
-      final double[] attack) {
+      final double[] attack,
+      final Set<Unit> pinned) {
     final GameMap map = data.getMap();
     for (final Territory z : map.getTerritories()) {
       if (!z.isWater()) {
@@ -207,6 +262,7 @@ public class ProClockUtils {
             pool.addAll(n.getMatches(landUnitOf(a)));
           }
         }
+        pool.removeAll(pinned);
         pool.sort(Comparator.comparingDouble((Unit u) -> -attackStrength(u)));
         for (final Unit u : pool) {
           final int cost = Math.max(1, u.getUnitAttachment().getTransportCost());

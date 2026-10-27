@@ -1,5 +1,9 @@
 package games.strategy.triplea.ai.pro;
 
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Experimental, individually toggleable changes to Hard AI behavior. Each {@link ProAi} instance
  * carries its own set, so differently patched AIs can play in one game; the empty set is the stock
@@ -98,4 +102,47 @@ public enum ProAiPatch {
    * infantry while T is far, only fast units once slow ones can't arrive. Stock otherwise.
    */
   STRIKE_TIMED_PURCHASE,
+  // AI-1: Dan's strategy model, one gate per component. AI-1 = all DAN_* gates on (see AI1).
+  /**
+   * Plan (Dan's model, sections 4 and 10): at its first purchase each player picks a strike, the
+   * nearest enemy capital by land from its factories (distance d), landing at random in round r +
+   * d, r + d + 1 or r + d + 3 among those that beat the enemies' clock on its capital. Until then,
+   * unless it must defend first (DAN_COOKED's rule), each factory buys only land units that reach
+   * the target by the strike round, the most combat power per PU among them; no offensive navy; and
+   * the target's value is tripled. After the plan's round it strikes only when its clock is 3 or
+   * less and beats the enemies'.
+   */
+  DAN_PLAN,
+  /**
+   * Don't get cooked (section 3): when the enemies' clock on my capital is 2 or less, or shorter
+   * than my strike and at most 4, purchase first buys the cheapest defence at the capital that
+   * leaves no kill up to my strike round (at most 4, at least 2), assuming the best defensive buy
+   * there on every later turn.
+   */
+  DAN_COOKED,
+  /**
+   * Objectives (section 9): capitals and victory cities are the only targets in the value map (not
+   * factories), and other territories' income counts only for the rounds before the decisive round
+   * (my strike or the enemies' clock) that it can still turn into force.
+   */
+  DAN_OBJECTIVES,
+  /**
+   * Fronts (section 8): per enemy power, the sum of delivered production, TUV traded and pin
+   * balance. Where my side out-produces the front (ratio rho > 1), combat move accepts even trades:
+   * my losses count 1 / min(rho, 2) in the attack keep test.
+   */
+  DAN_FRONTS,
+  /**
+   * Pins (section 6): clocks leave out the units each side's threats hold at its objectives; NCM
+   * keeps a stack that pins an enemy objective when freeing the units it holds would bring the
+   * enemies' clock on my capital to my strike round or less; and a holdable place territory the
+   * enemy can attack is padded with infantry (cheap hit points against strafes).
+   */
+  DAN_PINS,
+  ;
+
+  /** AI-1: Dan's strategy model with every component on. */
+  public static final Set<ProAiPatch> AI1 =
+      Collections.unmodifiableSet(
+          EnumSet.of(DAN_PLAN, DAN_COOKED, DAN_OBJECTIVES, DAN_FRONTS, DAN_PINS));
 }

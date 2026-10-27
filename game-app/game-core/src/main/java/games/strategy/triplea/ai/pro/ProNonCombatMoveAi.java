@@ -23,6 +23,7 @@ import games.strategy.triplea.ai.pro.data.ProTerritoryManager;
 import games.strategy.triplea.ai.pro.data.ProTransport;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
+import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProMoveUtils;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
@@ -98,6 +99,7 @@ class ProNonCombatMoveAi {
     // Find number of units in each move territory that can't move and all infra units
     findUnitsThatCantMove(purchaseTerritories, proData.getPurchaseOptions().getLandOptions());
     final Map<Unit, Set<Territory>> infraUnitMoveMap = findInfraUnitsThatCanMove();
+    applyDanPinGuard();
 
     // Try to have one land unit in each territory that is bordering an enemy territory
     final List<Territory> movedOneDefenderToTerritories =
@@ -2534,6 +2536,83 @@ class ProNonCombatMoveAi {
       }
       for (final String key : printMap4.keySet()) {
         ProLogger.trace("    " + printMap4.get(key) + " " + key);
+      }
+    }
+  }
+
+  /**
+   * DAN_PINS: a stack of mine that pins an enemy objective stays put when the enemy units it holds
+   * there, once free, would bring the enemies' clock on my capital to my strike round or less (at
+   * most {@link ProDanModel#COOKED_HORIZON}): unpinning frees a kill strike.
+   */
+  private void applyDanPinGuard() {
+    final ProDanModel.Turn turn = proData.getDanTurn();
+    final Territory capital = proData.getMyCapital();
+    if (turn == null
+        || !proData.hasPatch(ProAiPatch.DAN_PINS)
+        || capital == null
+        || !capital.isOwnedBy(player)) {
+      return;
+    }
+    final int round = data.getSequence().getRound();
+    final int strikeIn =
+        turn.target() == null
+            ? turn.myClock()
+            : Math.min(turn.myClock(), Math.max(1, turn.strikeRound() - round));
+    final int limit = Math.min(strikeIn, ProDanModel.COOKED_HORIZON);
+    final List<GamePlayer> enemies = ProUtils.getEnemyPlayers(player);
+    final List<GamePlayer> alliance = ProDanModel.alliance(player);
+    if (ProDanModel.clock(data, enemies, capital, false, Set.of()) > limit) {
+      return;
+    }
+    final int pinnedClock =
+        ProDanModel.clock(
+            data, enemies, capital, false, ProDanModel.pins(data, alliance, enemies).held());
+    if (pinnedClock <= limit) {
+      return;
+    }
+    final Map<Territory, ProTerritory> moveMap =
+        territoryManager.getDefendOptions().getTerritoryMap();
+    final Map<Unit, Set<Territory>> unitMoveMap =
+        territoryManager.getDefendOptions().getUnitMoveMap();
+    final Map<Territory, Set<Unit>> stacks = new HashMap<>();
+    for (final Unit u : unitMoveMap.keySet()) {
+      final Territory t = unitTerritoryMap.get(u);
+      if (t != null
+          && !t.isWater()
+          && Matches.unitIsLand().test(u)
+          && Matches.unitIsNotInfrastructure().test(u)
+          && moveMap.containsKey(t)
+          && !data
+              .getMap()
+              .getNeighbors(t, 2, ProMatches.territoryCanPotentiallyMoveLandUnits(player))
+              .stream()
+              .filter(n -> ProDanModel.isObjective(n))
+              .filter(n -> enemies.contains(n.getOwner()))
+              .toList()
+              .isEmpty()) {
+        stacks.computeIfAbsent(t, k -> new HashSet<>()).add(u);
+      }
+    }
+    for (final Map.Entry<Territory, Set<Unit>> stack : stacks.entrySet()) {
+      final Set<Unit> held = ProDanModel.pins(data, alliance, enemies, stack.getValue()).held();
+      final int clockWithout = ProDanModel.clock(data, enemies, capital, false, held);
+      if (clockWithout <= limit) {
+        proData.isPatchOn(ProAiPatch.DAN_PINS);
+        for (final Unit u : stack.getValue()) {
+          moveMap.get(stack.getKey()).addCantMoveUnit(u);
+          unitMoveMap.remove(u);
+        }
+        ProLogger.info(
+            player.getName()
+                + " DAN_PINS keeps "
+                + stack.getValue().size()
+                + " units in "
+                + stack.getKey().getName()
+                + " theirClock="
+                + pinnedClock
+                + " withoutStack="
+                + clockWithout);
       }
     }
   }

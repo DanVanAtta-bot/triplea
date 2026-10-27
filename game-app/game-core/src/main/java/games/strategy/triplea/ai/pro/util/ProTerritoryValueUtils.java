@@ -6,6 +6,7 @@ import games.strategy.engine.data.GameState;
 import games.strategy.engine.data.Route;
 import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.util.BreadthFirstSearch;
+import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.Matches;
@@ -28,6 +29,8 @@ import org.triplea.java.collections.CollectionUtils;
 @UtilityClass
 public final class ProTerritoryValueUtils {
   static final int MIN_FACTORY_CHECK_DISTANCE = 9;
+  // DAN_PLAN: the strike target's value as an objective, times this.
+  static final double PLAN_TARGET_FACTOR = 3;
 
   /**
    * Returns the relative value of attacking the specified territory compared to other territories.
@@ -36,7 +39,11 @@ public final class ProTerritoryValueUtils {
       final ProData proData, final GamePlayer player, final Territory t) {
     final int isEnemyFactory =
         ProMatches.territoryHasInfraFactoryAndIsEnemyLand(player).test(t) ? 1 : 0;
-    double value = 3.0 * TerritoryAttachment.getProduction(t) * (isEnemyFactory + 1);
+    double value =
+        3.0
+            * TerritoryAttachment.getProduction(t)
+            * (isEnemyFactory + 1)
+            * ProDanModel.incomeFactor(proData, t);
     if (ProUtils.isNeutralLand(t)) {
       final double strength =
           ProBattleUtils.estimateStrength(
@@ -60,7 +67,7 @@ public final class ProTerritoryValueUtils {
     final int maxLandMassSize = findMaxLandMassSize(player);
     final Map<Territory, Double> enemyCapitalsAndFactoriesMap =
         findEnemyCapitalsAndFactoriesValue(
-            player, maxLandMassSize, territoriesThatCantBeHeld, territoriesToAttack);
+            proData, player, maxLandMassSize, territoriesThatCantBeHeld, territoriesToAttack);
 
     final Map<Territory, Double> territoryValueMap = new HashMap<>();
     for (final Territory t : territoriesToCheck) {
@@ -204,6 +211,7 @@ public final class ProTerritoryValueUtils {
   }
 
   private static Map<Territory, Double> findEnemyCapitalsAndFactoriesValue(
+      final ProData proData,
       final GamePlayer player,
       final int maxLandMassSize,
       final List<Territory> territoriesThatCantBeHeld,
@@ -225,6 +233,21 @@ public final class ProTerritoryValueUtils {
     if (enemyCapitalsAndFactories.size() * 2 >= numPotentialEnemyTerritories) {
       enemyCapitalsAndFactories.clear();
     }
+    final ProDanModel.Turn danTurn = proData.getDanTurn();
+    final boolean objectivesOnly = danTurn != null && proData.isPatchOn(ProAiPatch.DAN_OBJECTIVES);
+    if (objectivesOnly) {
+      // Dan's model: capitals and victory cities are the only objectives
+      enemyCapitalsAndFactories.clear();
+      enemyCapitalsAndFactories.addAll(
+          CollectionUtils.getMatches(
+              allTerritories,
+              t ->
+                  !t.isWater()
+                      && ProDanModel.isObjective(t)
+                      && (Matches.isTerritoryOwnedByAnyOf(ProUtils.getPotentialEnemyPlayers(player))
+                              .test(t)
+                          || territoriesThatCantBeHeld.contains(t))));
+    }
     enemyCapitalsAndFactories.addAll(ProUtils.getLiveEnemyCapitals(data, player));
     enemyCapitalsAndFactories.removeAll(territoriesToAttack);
 
@@ -233,7 +256,7 @@ public final class ProTerritoryValueUtils {
     for (final Territory t : enemyCapitalsAndFactories) {
       // Get factory production if factory
       int factoryProduction = 0;
-      if (ProMatches.territoryHasInfraFactoryAndIsLand().test(t)) {
+      if (objectivesOnly || ProMatches.territoryHasInfraFactoryAndIsLand().test(t)) {
         factoryProduction = TerritoryAttachment.getProduction(t);
       }
 
@@ -250,12 +273,18 @@ public final class ProTerritoryValueUtils {
               + data.getMap()
                   .getNeighbors(t, 6, ProMatches.territoryCanPotentiallyMoveLandUnits(player))
                   .size();
-      final double value =
+      double value =
           Math.sqrt(factoryProduction + Math.sqrt(playerProduction))
               * 32
               / (1 + 3.0 * isNeutral)
               * landMassSize
               / maxLandMassSize;
+      if (danTurn != null
+          && danTurn.isStriking()
+          && t.getName().equals(danTurn.target())
+          && proData.isPatchOn(ProAiPatch.DAN_PLAN)) {
+        value *= PLAN_TARGET_FACTOR;
+      }
       enemyCapitalsAndFactoriesMap.put(t, value);
     }
 
@@ -313,7 +342,9 @@ public final class ProTerritoryValueUtils {
       final int distance =
           data.getMap().getDistance(t, nearbyEnemyTerritory, territoryToNeighborCondition);
       if (distance > 0) {
-        double value = TerritoryAttachment.getProduction(nearbyEnemyTerritory);
+        double value =
+            TerritoryAttachment.getProduction(nearbyEnemyTerritory)
+                * ProDanModel.incomeFactor(proData, nearbyEnemyTerritory);
         if (ProUtils.isNeutralLand(nearbyEnemyTerritory)) {
           // find neutral value
           value = findTerritoryAttackValue(proData, player, nearbyEnemyTerritory) / 3;

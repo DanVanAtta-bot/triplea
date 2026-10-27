@@ -15,6 +15,7 @@ import games.strategy.triplea.ai.pro.data.ProTerritoryManager;
 import games.strategy.triplea.ai.pro.data.ProTransport;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
+import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProMoveUtils;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
@@ -27,6 +28,7 @@ import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.delegate.battle.AirBattle;
 import games.strategy.triplea.delegate.remote.IMoveDelegate;
+import games.strategy.triplea.util.TuvUtils;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -322,7 +324,8 @@ public class ProCombatMoveAi {
               * (1 + isEmptyLand)
               * (1 + isFactory)
               * (1 - 0.5 * isAmphib)
-              * productionAndIsCapital.production;
+              * productionAndIsCapital.production
+              * ProDanModel.incomeFactor(proData, t);
       double attackValue =
           (tuvSwing + territoryValue)
               * (1 + 4.0 * productionAndIsCapital.isCapital)
@@ -1253,10 +1256,23 @@ public class ProCombatMoveAi {
                         + isFactory
                         + isCanHold * (1 + 2.0 * isFfa + 1.5 * isFactory + 0.5 * capturableUnits))
                     * production
+                    * ProDanModel.incomeFactor(proData, t)
                 + capitalValue;
         double tuvSwing = result.getTuvSwing();
         if (isFfa == 1 && tuvSwing > 0) {
           tuvSwing *= 0.5;
+        }
+        final double lossScale = danLossScale(t);
+        if (lossScale < 1) {
+          // DAN_FRONTS: out-producing this front, so an even trade still gains
+          final List<Unit> attackers = new ArrayList<>(patd.getUnits());
+          patd.getAmphibAttackMap().values().forEach(attackers::addAll);
+          final double myLoss =
+              TuvUtils.getTuv(attackers, proData.getUnitValueMap())
+                  - TuvUtils.getTuv(
+                      result.getAverageAttackersRemaining(), proData.getUnitValueMap());
+          tuvSwing += Math.max(0, myLoss) * (1 - lossScale);
+          enemyCounterTuvSwing *= lossScale;
         }
         final double attackValue =
             1
@@ -2184,5 +2200,22 @@ public class ProCombatMoveAi {
                 ProMatches.territoryCanMoveAirUnitsAndNoAa(data, player, true));
     final boolean usesMoreThanHalfOfRange = distance > range / 2;
     return isAdjacentToAlliedFactory || !usesMoreThanHalfOfRange;
+  }
+
+  /**
+   * DAN_FRONTS: where my side out-produces the front of the territory's owner (rho > 1), my losses
+   * there count 1 / min(rho, 2). 1 otherwise.
+   */
+  private double danLossScale(final Territory t) {
+    final ProDanModel.Turn turn = proData.getDanTurn();
+    if (turn == null || !proData.hasPatch(ProAiPatch.DAN_FRONTS)) {
+      return 1;
+    }
+    final ProDanModel.Front front = turn.fronts().get(t.getOwner().getName());
+    if (front == null || front.rho() <= 1) {
+      return 1;
+    }
+    proData.isPatchOn(ProAiPatch.DAN_FRONTS);
+    return 1 / Math.min(front.rho(), 2);
   }
 }

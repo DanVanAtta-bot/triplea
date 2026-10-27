@@ -20,6 +20,7 @@ import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.simulate.ProDummyDelegateBridge;
 import games.strategy.triplea.ai.pro.simulate.ProSimulateTurnUtils;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
+import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
@@ -184,6 +185,11 @@ public abstract class AbstractProAi extends AbstractAi {
     initializeData();
     if (proData.isPatchOn(ProAiPatch.NO_OP)) {
       ProLogger.info(player.getName() + " NO_OP patch gate reached");
+    }
+    if (!purchaseForBid && ProDanModel.anyGate(proData)) {
+      final ProDanModel.Turn turn = ProDanModel.startTurn(proData, data, player);
+      proData.setDanTurn(turn);
+      ProLogger.info(player.getName() + " DAN " + turn);
     }
     if (pusToSpend <= 0) {
       return;

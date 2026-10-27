@@ -27,6 +27,7 @@ import games.strategy.triplea.ai.pro.data.ProTerritoryManager;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProClockUtils;
+import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProKillUtils;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
@@ -74,6 +75,10 @@ class ProPurchaseAi {
   private Map<Territory, Integer> strikeMinMovement = Map.of();
   // KILL_PURCHASE: factories whose new units can join next turn's capital attack, by land distance.
   private Map<Territory, Integer> killFactoryDistance = Map.of();
+  // DAN_PLAN: skip the offensive sea and amphibious buy while a land strike is planned.
+  private boolean danNoNavy = false;
+  // DAN_PINS: least fodder share at a holdable place territory the enemy can attack.
+  static final int PAD_FODDER_PERCENT = 85;
 
   ProPurchaseAi(final AbstractProAi ai) {
     this.calc = ai.getCalc();
@@ -315,6 +320,7 @@ class ProPurchaseAi {
         true);
 
     applyClockGates(purchaseTerritories, purchaseOptions);
+    applyDanGates(purchaseTerritories, purchaseOptions);
 
     // Find strategic value for each territory
     ProLogger.info("Find strategic value for place territories");
@@ -368,7 +374,10 @@ class ProPurchaseAi {
     final List<ProPlaceTerritory> prioritizedSeaTerritories =
         prioritizeSeaTerritories(purchaseTerritories);
     final boolean shouldSaveUpForAFleet =
-        purchaseSeaAndAmphibUnits(purchaseTerritories, prioritizedSeaTerritories, purchaseOptions);
+        danNoNavy && proData.isPatchOn(ProAiPatch.DAN_PLAN)
+            ? false
+            : purchaseSeaAndAmphibUnits(
+                purchaseTerritories, prioritizedSeaTerritories, purchaseOptions);
 
     // Try to use any remaining PUs on high value units, except if we need to save up for a fleet.
     if (!shouldSaveUpForAFleet) {
@@ -571,6 +580,128 @@ class ProPurchaseAi {
         player.getName()
             + " CAPITAL_CLOCK_RESERVE clock="
             + theirClock
+            + " bought "
+            + bought
+            + " "
+            + best.get().getUnitType().getName());
+  }
+
+  /**
+   * DAN_PLAN and DAN_COOKED (Dan's model). The plan's strike sets the least speed of land units
+   * bought at each factory: only units that reach the target by the strike round. When the enemies'
+   * clock on my capital says defend first, buy the cheapest defence at the capital that leaves no
+   * kill before my own strike (between 2 and 4 rounds).
+   */
+  private void applyDanGates(
+      final Map<Territory, ProPurchaseTerritory> purchaseTerritories,
+      final ProPurchaseOptionMap purchaseOptions) {
+    danNoNavy = false;
+    final ProDanModel.Turn turn = proData.getDanTurn();
+    if (turn == null) {
+      return;
+    }
+    final int round = data.getSequence().getRound();
+    if (proData.hasPatch(ProAiPatch.DAN_PLAN) && turn.isStriking()) {
+      final Territory target = data.getMap().getTerritoryOrNull(turn.target());
+      final int rounds = turn.strikeRound() - round;
+      if (target != null && rounds > 0) {
+        final Map<Territory, Integer> minMovement = new HashMap<>();
+        for (final Territory f : purchaseTerritories.keySet()) {
+          if (f.isWater()) {
+            continue;
+          }
+          final int d =
+              data.getMap()
+                  .getDistanceIgnoreEndForCondition(
+                      f, target, ProMatches.territoryCanPotentiallyMoveLandUnits(player));
+          if (d > 0) {
+            minMovement.put(f, Math.max(1, (d + rounds - 1) / rounds));
+          }
+        }
+        if (!minMovement.isEmpty()) {
+          proData.isPatchOn(ProAiPatch.DAN_PLAN);
+          strikeMinMovement = minMovement;
+          // No navy only when the capital marches on the target (Dan's Germany), not for an
+          // island capital that ships its army
+          danNoNavy =
+              proData.getMyCapital() != null && minMovement.containsKey(proData.getMyCapital());
+          ProLogger.info(
+              player.getName()
+                  + " DAN_PLAN target="
+                  + target.getName()
+                  + " strikeRound="
+                  + turn.strikeRound()
+                  + " minMovement="
+                  + minMovement);
+        }
+      }
+    }
+    if (!proData.hasPatch(ProAiPatch.DAN_COOKED) || !turn.cooked()) {
+      return;
+    }
+    final Territory capital = proData.getMyCapital();
+    if (capital == null || !capital.isOwnedBy(player)) {
+      return;
+    }
+    final ProPurchaseTerritory ppt = purchaseTerritories.get(capital);
+    if (ppt == null) {
+      return;
+    }
+    final ProPlaceTerritory place =
+        ppt.getCanPlaceTerritories().stream()
+            .filter(p -> p.getTerritory().equals(capital))
+            .findFirst()
+            .orElse(null);
+    if (place == null) {
+      return;
+    }
+    final int strikeIn =
+        turn.target() == null
+            ? turn.myClock()
+            : Math.min(turn.myClock(), turn.strikeRound() - round);
+    final int rounds = Math.max(2, Math.min(strikeIn, ProDanModel.COOKED_HORIZON));
+    final List<GamePlayer> enemies = ProUtils.getEnemyPlayers(player);
+    final Set<Unit> pinned =
+        proData.hasPatch(ProAiPatch.DAN_PINS)
+            ? ProDanModel.pins(data, ProDanModel.alliance(player), enemies).held()
+            : Set.of();
+    double deficit = ProClockUtils.defenceDeficit(data, enemies, capital, rounds, pinned);
+    for (final Unit u : place.getPlaceUnits()) {
+      deficit -=
+          2.0 * u.getUnitAttachment().getHitPoints() + u.getUnitAttachment().getDefense(player);
+    }
+    if (deficit <= 0) {
+      return;
+    }
+    final Optional<ProPurchaseOption> best =
+        ProPurchaseValidationUtils.findPurchaseOptionsForTerritory(
+                proData, player, purchaseOptions.getLandOptions(), capital, isBid)
+            .stream()
+            .filter(o -> o.getCost() > 0 && o.getDefense() > 0)
+            .max(
+                Comparator.comparingDouble(
+                    o -> (2.0 * o.getHitPoints() + o.getDefense()) / o.getCost()));
+    if (best.isEmpty()) {
+      return;
+    }
+    proData.isPatchOn(ProAiPatch.DAN_COOKED);
+    final double strength =
+        (2.0 * best.get().getHitPoints() + best.get().getDefense()) * best.get().getQuantity();
+    int bought = 0;
+    while (deficit > 0
+        && resourceTracker.hasEnough(best.get())
+        && ppt.getRemainingUnitProduction() >= best.get().getQuantity()) {
+      resourceTracker.purchase(best.get());
+      addUnitsToPlace(place, best.get().createTempUnits());
+      bought += best.get().getQuantity();
+      deficit -= strength;
+    }
+    ProLogger.info(
+        player.getName()
+            + " DAN_COOKED theirClock="
+            + turn.theirClock()
+            + " rounds="
+            + rounds
             + " bought "
             + bought
             + " "
@@ -1333,7 +1464,14 @@ class ProPurchaseAi {
       if (enemyDistance <= 0) {
         enemyDistance = 10;
       }
-      final int fodderPercent = 80 - enemyDistance * 5;
+      int fodderPercent = 80 - enemyDistance * 5;
+      if (proData.hasPatch(ProAiPatch.DAN_PINS)
+          && fodderPercent < PAD_FODDER_PERCENT
+          && territoryManager.getEnemyAttackOptions().getMax(t) != null
+          && proData.isPatchOn(ProAiPatch.DAN_PINS)) {
+        // A stack the enemy can attack but not take: pad it with cheap hit points
+        fodderPercent = PAD_FODDER_PERCENT;
+      }
       ProLogger.debug(t + ", enemyDistance=" + enemyDistance + ", fodderPercent=" + fodderPercent);
       final Set<Territory> neighbors =
           data.getMap().getNeighbors(t, 2, ProMatches.territoryCanMoveLandUnits(player, false));

@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * The Purpose of this class is to record various information about combat, in order to use it for
@@ -105,6 +106,27 @@ public class BattleRecords implements Serializable {
         lostTuv += br.getAttackerLostTuv();
       } else {
         lostTuv += br.getDefenderLostTuv();
+      }
+    }
+    return lostTuv;
+  }
+
+  /**
+   * Returns the TUV lost by the attackers (or, if {@code attackerLostTuv} is false, the defenders)
+   * in the battles of {@code brs} whose attacker and defender match.
+   */
+  public static int getLostTuvBetween(
+      final BattleRecords brs,
+      final Predicate<GamePlayer> attacker,
+      final Predicate<GamePlayer> defender,
+      final boolean attackerLostTuv) {
+    int lostTuv = 0;
+    for (final BattleRecord br : getAllRecords(brs)) {
+      if (br.getAttacker() != null
+          && br.getDefender() != null
+          && attacker.test(br.getAttacker())
+          && defender.test(br.getDefender())) {
+        lostTuv += attackerLostTuv ? br.getAttackerLostTuv() : br.getDefenderLostTuv();
       }
     }
     return lostTuv;

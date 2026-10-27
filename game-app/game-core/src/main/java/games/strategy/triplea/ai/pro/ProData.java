@@ -10,6 +10,7 @@ import games.strategy.triplea.Properties;
 import games.strategy.triplea.ai.pro.data.ProPurchaseOption;
 import games.strategy.triplea.ai.pro.data.ProPurchaseOptionMap;
 import games.strategy.triplea.ai.pro.data.ProTerritory;
+import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.util.TuvCostsCalculator;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nullable;
 import lombok.Getter;
+import lombok.Setter;
 import org.triplea.java.collections.CollectionUtils;
 import org.triplea.java.collections.IntegerMap;
 
@@ -51,6 +53,9 @@ public final class ProData {
   private Set<ProAiPatch> patches;
   // How often each enabled patch's gate was hit; a patch that never fires cannot change results.
   private final Map<ProAiPatch, Integer> patchHits = new EnumMap<>(ProAiPatch.class);
+  // DAN_* gates: each player's strike plan, kept for the game, and this turn's readings.
+  private final Map<String, ProDanModel.Plan> danPlans = new HashMap<>();
+  @Setter private @Nullable ProDanModel.Turn danTurn = null;
 
   public ProData() {
     this(Set.of());
