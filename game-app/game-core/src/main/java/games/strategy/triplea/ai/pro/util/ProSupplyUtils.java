@@ -309,40 +309,35 @@ public class ProSupplyUtils {
     if (bestTime == NONE) {
       return null;
     }
-    // Naval dominance on the route: my alliance's fleet there against the enemies' fleet and air
+    // Naval dominance in the theater (zones within 2 of the route): both sides' fleets there and
+    // the air on or next to those zones
     double mine = 0;
     double theirs = 0;
     int capacity = 0;
-    final Set<Territory> nearAir = new java.util.HashSet<>();
+    final Set<Territory> theater = new java.util.HashSet<>();
     for (final Map.Entry<Territory, Integer> e : sea.entrySet()) {
-      if (e.getValue() > bestSea + 2) {
-        continue;
+      if (e.getValue() <= bestSea + 2) {
+        theater.add(e.getKey());
+        theater.addAll(map.getNeighbors(e.getKey()));
       }
-      final Territory z = e.getKey();
-      final boolean onRoute = e.getValue() <= bestSea;
-      nearAir.add(z);
-      nearAir.addAll(map.getNeighbors(z));
-      for (final Unit u : z.getUnits()) {
+    }
+    for (final Territory t : theater) {
+      for (final Unit u : t.getUnits()) {
         final UnitAttachment ua = u.getUnitAttachment();
-        if (u.isOwnedBy(p) && Matches.unitIsSeaTransport().test(u)) {
+        final boolean naval = Matches.unitIsSea().test(u);
+        if (t.isWater() && naval && u.isOwnedBy(p) && Matches.unitIsSeaTransport().test(u)) {
           capacity += Math.max(0, ua.getTransportCapacity());
         }
-        if (!onRoute || !Matches.unitIsSea().test(u) || Matches.unitIsSeaTransport().test(u)) {
+        final boolean counts =
+            (t.isWater() && naval && !Matches.unitIsSeaTransport().test(u))
+                || Matches.unitIsAir().test(u);
+        if (!counts) {
           continue;
         }
         if (data.getRelationshipTracker().isAllied(p, u.getOwner())) {
           mine += 2.0 * ua.getHitPoints() + ua.getDefense(u.getOwner());
         } else if (data.getRelationshipTracker().isAtWar(p, u.getOwner())) {
           theirs += 2.0 * ua.getHitPoints() + ua.getAttack(u.getOwner());
-        }
-      }
-    }
-    for (final Territory t : nearAir) {
-      for (final Unit u : t.getUnits()) {
-        if (Matches.unitIsAir().test(u) && data.getRelationshipTracker().isAtWar(p, u.getOwner())) {
-          theirs +=
-              2.0 * u.getUnitAttachment().getHitPoints()
-                  + u.getUnitAttachment().getAttack(u.getOwner());
         }
       }
     }
