@@ -392,7 +392,7 @@ public class ProSupplyUtils {
     return 2.0 * o.getHitPoints() + (attacking ? o.getAttack() : o.getDefense());
   }
 
-  static Map<Territory, Integer> landDistances(final GameMap map, final Territory x) {
+  public static Map<Territory, Integer> landDistances(final GameMap map, final Territory x) {
     return ProClockUtils.bfs(
         map,
         x,

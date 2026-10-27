@@ -153,7 +153,7 @@ public enum ProAiPatch {
    * Factories (Dan's A7, "the reason to make factories"): before the land buy, buys a factory where
    * it adds the most strength arriving at the strike target (or nearest enemy capital) within 6
    * rounds, if that gain is worth at least twice the factory's PUs, the territory produces 3 or
-   * more, has no factory of mine next to it, and holds for 2 turns.
+   * more, has a land route to the target and no factory of mine next to it, and holds for 2 turns.
    */
   DAN_FACTORY,
   ;

@@ -719,8 +719,9 @@ class ProPurchaseAi {
   /**
    * DAN_FACTORY: buy a factory where it adds the most strength arriving at the strike target (or
    * the nearest live enemy capital) within {@link #FACTORY_HORIZON} rounds, when that gain, in PUs
-   * of my best attack unit, is worth more than the factory and my side holds the territory for 2
-   * turns.
+   * of my best attack unit, is at least twice the factory's cost, my side holds the territory for 2
+   * turns, and it produces 3 or more, marches on the target by land and has no factory of mine next
+   * to it.
    */
   private void applyDanFactory(
       final Map<Territory, ProPurchaseTerritory> factoryPurchaseTerritories,
@@ -756,6 +757,9 @@ class ProPurchaseAi {
     }
     final List<GamePlayer> alliance = ProDanModel.alliance(player);
     final List<GamePlayer> enemies = ProUtils.getEnemyPlayers(player);
+    // Overseas, shipping and not production limits arrival, so only sites that march on the target
+    final Map<Territory, Integer> landToTarget =
+        ProSupplyUtils.landDistances(data.getMap(), target);
     Territory best = null;
     ProPurchaseOption bestOption = null;
     double bestGain = 0;
@@ -765,6 +769,7 @@ class ProPurchaseAi {
             ProMatches.territoryHasNoInfraFactoryAndIsNotConqueredOwnedLand(player)
                 .and(ProMatches.territoryIsNotConqueredOnItsBoard()))) {
       if (TerritoryAttachment.getProduction(c) < FACTORY_MIN_PRODUCTION
+          || !landToTarget.containsKey(c)
           || factoryPurchaseTerritories.containsKey(c)
           || data.getMap().getNeighbors(c).stream()
               .anyMatch(
