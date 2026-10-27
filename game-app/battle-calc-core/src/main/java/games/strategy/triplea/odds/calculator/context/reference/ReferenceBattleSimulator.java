@@ -74,6 +74,7 @@ public class ReferenceBattleSimulator implements BattleSimulator {
   // one simulator serves one thread.
   private final Map<PlanKey, BattleRound> planMemo = new HashMap<>();
   private final Map<MarginalKey, Map<CombatProfile, Integer>> marginalMemo = new HashMap<>();
+  private final Map<AllocationKey, Force> allocationMemo = new HashMap<>();
   private BattleScenario memoScenario;
 
   public ReferenceBattleSimulator() {
@@ -99,6 +100,7 @@ public class ReferenceBattleSimulator implements BattleSimulator {
     if (scenario != memoScenario) {
       planMemo.clear();
       marginalMemo.clear();
+      allocationMemo.clear();
       memoScenario = scenario;
     }
     final ProfileStats stats = new ProfileStats(costByProfile(scenario));
@@ -337,6 +339,14 @@ public class ReferenceBattleSimulator implements BattleSimulator {
   }
 
   private record PlanKey(Side side, int round, List<Object> firing, List<Object> enemy) {}
+
+  private record AllocationKey(
+      Side side,
+      FiringMode firingMode,
+      int hits,
+      List<Object> force,
+      List<CombatProfile> eligible,
+      Map<CombatProfile, Integer> effectivePower) {}
 
   private record MarginalKey(
       Side side, boolean firstRound, List<Object> target, List<Object> enemy) {}
@@ -656,17 +666,33 @@ public class ReferenceBattleSimulator implements BattleSimulator {
                 scenario.support(),
                 round,
                 scenario.diceSides()));
-    final Force after =
-        allocator.allocate(
-            new Force(targetForce),
-            hits,
-            target,
-            scenario.dependents(),
-            constraints,
-            order,
-            firingMode,
+    // Allocation is deterministic (no dice) and a pure function of this key; the dependents,
+    // constraints, order and costs are fixed per scenario (the order by side).
+    final AllocationKey key =
+        new AllocationKey(
             targetSide,
-            fireStats);
+            firingMode,
+            hits,
+            ordered(targetForce),
+            List.copyOf(target.eligibleTargets()),
+            fireStats.effectivePower());
+    Force after = allocationMemo.get(key);
+    if (after == null) {
+      after =
+          allocator.allocate(
+              new Force(targetForce),
+              hits,
+              target,
+              scenario.dependents(),
+              constraints,
+              order,
+              firingMode,
+              targetSide,
+              fireStats);
+      if (allocationMemo.size() < PLAN_MEMO_LIMIT) {
+        allocationMemo.put(key, after);
+      }
+    }
     targetForce.clear();
     targetForce.putAll(after.counts());
   }
