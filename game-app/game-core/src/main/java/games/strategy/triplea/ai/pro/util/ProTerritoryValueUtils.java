@@ -279,10 +279,13 @@ public final class ProTerritoryValueUtils {
     final GameData data = proData.getData();
     final Collection<Territory> nearbyEnemyCapitalsAndFactories =
         findNearbyEnemyCapitalsAndFactories(t, enemyCapitalsAndFactoriesMap.keySet());
+    // Built once, not per edge: the distance searches below test every edge they cross.
+    final Predicate<Territory> canPotentiallyMoveLand =
+        ProMatches.territoryCanPotentiallyMoveLandUnits(player);
+    final BiPredicate<Territory, Territory> noCanals =
+        ProMatches.noCanalsBetweenTerritories(player);
     final BiPredicate<Territory, Territory> territoryToNeighborCondition =
-        (t1, t2) ->
-            ProMatches.territoryCanPotentiallyMoveLandUnits(player).test(t2)
-                && ProMatches.noCanalsBetweenTerritories(player).test(t1, t2);
+        (t1, t2) -> canPotentiallyMoveLand.test(t2) && noCanals.test(t1, t2);
     for (final Territory enemyCapitalOrFactory : nearbyEnemyCapitalsAndFactories) {
       final int distance =
           data.getMap().getDistance(t, enemyCapitalOrFactory, territoryToNeighborCondition);

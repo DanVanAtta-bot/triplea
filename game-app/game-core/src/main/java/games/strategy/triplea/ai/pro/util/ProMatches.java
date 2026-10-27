@@ -11,6 +11,7 @@ import games.strategy.engine.data.Unit;
 import games.strategy.engine.data.UnitType;
 import games.strategy.engine.data.properties.GameProperties;
 import games.strategy.triplea.Properties;
+import games.strategy.triplea.attachments.CanalAttachment;
 import games.strategy.triplea.delegate.AbstractMoveDelegate;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.delegate.TerritoryEffectHelper;
@@ -28,6 +29,11 @@ public final class ProMatches {
   public static BiPredicate<Territory, Territory> noCanalsBetweenTerritories(
       final GamePlayer player) {
     return (startTerritory, endTerritory) -> {
+      // A canal needs both ends; skip building a route and validator for the usual canal-free step.
+      if (!CanalAttachment.hasAnyCanal(startTerritory)
+          || !CanalAttachment.hasAnyCanal(endTerritory)) {
+        return true;
+      }
       final Route r = new Route(startTerritory, endTerritory);
       return new MoveValidator(player.getData(), false).validateCanal(r, null, player) == null;
     };
