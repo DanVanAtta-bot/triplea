@@ -51,7 +51,9 @@ import javax.annotation.Nullable;
  * a fixed bid before round 1, see {@link FixedBid}. {@code --props} overrides game options by their
  * exact XML name; Tech Development is always forced off. Every game writes {@code <out>/<game id>/}
  * with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds; see {@link
- * GameRecorder}.
+ * GameRecorder}. {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early, won by the
+ * side that has been decisively ahead for that many round ends (see {@link DecisiveRule}); it
+ * prints a DECISIVE line before RESULT, and RESULT shows the game as that side's win.
  *
  * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
  * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
@@ -77,6 +79,8 @@ public final class AiMatch {
     final Map<String, String> props = parseProps(opts.getOrDefault("props", ""));
     props.put(Constants.TECH_DEVELOPMENT, "false");
 
+    final DecisiveRule.Spec decisive =
+        opts.containsKey("decisive") ? DecisiveRule.Spec.parse(opts.get("decisive")) : null;
     final String calc = opts.getOrDefault("calc", "concurrent");
     if (!List.of("bounded", "concurrent").contains(calc)) {
       throw new IllegalArgumentException("--calc must be bounded or concurrent: " + calc);
@@ -103,12 +107,14 @@ public final class AiMatch {
     runConfig.put("java", System.getProperty("java.version"));
     runConfig.put("scripts", opts.getOrDefault("scripts", ""));
     runConfig.put("cpus", Runtime.getRuntime().availableProcessors());
+    runConfig.put("decisive", decisive == null ? null : decisive.toString());
     GameTestUtils.setUp();
     // ProAi resolves its static calculator once per JVM, on first use, from this setting.
     ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
     System.out.println("CALC " + calc);
     System.out.println("BID " + (bid == null ? "none" : bid.summary()));
     System.out.println("SCRIPTS " + opts.getOrDefault("scripts", "none"));
+    System.out.println("DECISIVE_RULE " + (decisive == null ? "off" : decisive));
     if (opts.containsKey("start") || opts.containsKey("start-list")) {
       if (bid != null || opts.containsKey("swap")) {
         throw new IllegalArgumentException("--bid and --swap don't apply to a human start");
@@ -127,7 +133,8 @@ public final class AiMatch {
           outRoot,
           HumanStart.read(spec),
           Integer.parseInt(opts.getOrDefault("play-rounds", "0")),
-          props);
+          props,
+          decisive);
       System.exit(0);
     }
     final List<String> orientations = new ArrayList<>(List.of(patchedAlliance));
@@ -146,7 +153,8 @@ public final class AiMatch {
           recorderOptions,
           runConfig,
           props,
-          scripts);
+          scripts,
+          decisive);
     }
     // Game threads (battle calculator workers etc.) are not all daemons.
     System.exit(0);
@@ -163,7 +171,8 @@ public final class AiMatch {
       final GameRecorder.Options recorderOptions,
       final Map<String, Object> runConfig,
       final Map<String, String> props,
-      final Map<String, Map<Integer, KataScript>> scripts) {
+      final Map<String, Map<Integer, KataScript>> scripts,
+      @Nullable final DecisiveRule.Spec decisive) {
     final List<ProAi> ais = new ArrayList<>();
     final Map<String, KataAi> scripted = new TreeMap<>();
     final DecisionLog decisionLog = new DecisionLog();
@@ -221,6 +230,8 @@ public final class AiMatch {
               + ", map has "
               + scripted.keySet());
     }
+    final DecisiveRule rule = newRule(decisive, data);
+    Decision decided = null;
     while (!game.isGameOver() && !recorder.isOver() && data.getSequence().getRound() <= roundCap) {
       final int round = data.getSequence().getRound();
       scripted.forEach(
@@ -232,11 +243,17 @@ public final class AiMatch {
       recorder.beforeStep();
       game.runNextStep();
       recorder.afterStep();
+      decided = recorder.isOver() ? null : checkRoundEnd(rule, data, round);
+      if (decided != null) {
+        break;
+      }
     }
     final double seconds = (System.nanoTime() - start) / 1e9;
-    final boolean over = recorder.isOver();
+    final boolean over = recorder.isOver() || decided != null;
     final Collection<GamePlayer> winners =
-        over ? ((EndRoundDelegate) data.getEndRoundDelegate()).getWinners() : List.of();
+        decided != null
+            ? decided.winners(data)
+            : over ? ((EndRoundDelegate) data.getEndRoundDelegate()).getWinners() : List.of();
     final int rounds = recorder.lastRound();
     final String winnerAlliance =
         winners.stream().map(AiMatch::allianceOf).distinct().collect(Collectors.joining("+"));
@@ -248,6 +265,7 @@ public final class AiMatch {
     result.put("seconds", Math.round(seconds * 10) / 10.0);
     result.put("victory_cities", victoryCities(data));
     result.put("patch_hits_by_side", patchHitsBySide(data, ais, variantBySide.keySet()));
+    result.put("decisive", decided == null ? null : decided.describe());
     final Map<String, List<String>> scriptActions = new TreeMap<>();
     scripted.forEach((name, ai) -> scriptActions.put(name, ai.getActions()));
     result.put("script_actions", scriptActions);
@@ -261,6 +279,9 @@ public final class AiMatch {
         (name, actions) -> actions.forEach(a -> System.out.println("SCRIPT " + name + " " + a)));
     System.out.println("SCRIPT_FAILURES " + scriptFailures);
     recorder.finish(result);
+    if (decided != null) {
+      decided.print();
+    }
     System.out.printf(
         "RESULT map=%s patched=%s patches=%s baselinePatches=%s bid=%s winner=%s winners=%s"
             + " rounds=%d capped=%s seconds=%.1f victoryCities=%s patchHitsBySide=%s%n",
@@ -297,7 +318,8 @@ public final class AiMatch {
       final Path outRoot,
       final HumanStart start,
       final int playRounds,
-      final Map<String, String> props)
+      final Map<String, String> props,
+      @Nullable final DecisiveRule.Spec decisive)
       throws IOException {
     final List<ProAi> ais = new ArrayList<>();
     final DecisionLog decisionLog = new DecisionLog();
@@ -362,6 +384,8 @@ public final class AiMatch {
       header.addProperty("option_errors", optionErrors.toString());
       log.line(header);
       boolean stopped = false;
+      final DecisiveRule rule = newRule(decisive, data);
+      Decision decided = null;
       while (!game.isGameOver()
           && endRound.getWinners().isEmpty()
           && data.getSequence().getRound() <= roundCap) {
@@ -371,10 +395,16 @@ public final class AiMatch {
           stopped = true;
           break;
         }
+        final int round = data.getSequence().getRound();
         log.beforeStep();
         game.runNextStep();
+        decided = endRound.getWinners().isEmpty() ? checkRoundEnd(rule, data, round) : null;
+        if (decided != null) {
+          break;
+        }
       }
-      final Collection<GamePlayer> winners = endRound.getWinners();
+      final Collection<GamePlayer> winners =
+          decided != null ? decided.winners(data) : endRound.getWinners();
       final String winnerAlliance =
           winners.stream().map(AiMatch::allianceOf).distinct().collect(Collectors.joining("+"));
       final boolean over = !winners.isEmpty();
@@ -382,10 +412,14 @@ public final class AiMatch {
       end.addProperty("winner", over ? winnerAlliance : null);
       end.addProperty("capped", !over);
       end.addProperty("stopped_after_rounds", stopped);
+      end.addProperty("decisive_round", decided == null ? null : decided.round());
       end.addProperty("seconds", Math.round((System.nanoTime() - t0) / 1e8) / 10.0);
       log.line(end);
       if (playRounds > 0) {
         log.exportHistory(Integer.MAX_VALUE);
+      }
+      if (decided != null) {
+        decided.print();
       }
       System.out.printf(
           "RESULT map=%s patched=%s patches=%s baselinePatches=%s bid=none winner=%s winners=%s"
@@ -396,12 +430,52 @@ public final class AiMatch {
           baselinePatches,
           over ? winnerAlliance : "none",
           winners.stream().map(GamePlayer::getName).sorted().toList(),
-          data.getSequence().getRound(),
+          decided != null ? decided.round() : data.getSequence().getRound(),
           !over,
           (System.nanoTime() - t0) / 1e9,
           victoryCities(data),
           patchHitsBySide(data, ais, List.of("Axis", "Allies")));
     }
+  }
+
+  /** A game ended by {@code --decisive}: the side called the winner after the given round. */
+  private record Decision(String side, int round, DecisiveRule.Spec spec) {
+    Collection<GamePlayer> winners(final GameData data) {
+      return data.getPlayerList().getPlayers().stream()
+          .filter(p -> allianceOf(p).equals(side))
+          .toList();
+    }
+
+    Map<String, Object> describe() {
+      return Map.of("side", side, "round", round, "rule", spec.toString());
+    }
+
+    void print() {
+      System.out.println("DECISIVE side=" + side + " round=" + round + " rule=" + spec);
+    }
+  }
+
+  @Nullable
+  private static DecisiveRule newRule(@Nullable final DecisiveRule.Spec spec, final GameData data) {
+    if (spec == null) {
+      return null;
+    }
+    final Set<String> sides = DecisiveRule.measure(data).keySet();
+    if (sides.size() != 2) {
+      throw new IllegalArgumentException("--decisive needs a two-side map, this one has " + sides);
+    }
+    return new DecisiveRule(spec);
+  }
+
+  /** Feeds the rule when the step just run ended {@code round}; returns a decision, else null. */
+  @Nullable
+  private static Decision checkRoundEnd(
+      @Nullable final DecisiveRule rule, final GameData data, final int round) {
+    if (rule == null || data.getSequence().getRound() == round) {
+      return null;
+    }
+    final String side = rule.roundEnded(DecisiveRule.measure(data));
+    return side == null ? null : new Decision(side, round, rule.spec());
   }
 
   private static PlayerTypes.Type proAiType(
@@ -598,7 +672,8 @@ public final class AiMatch {
           Map.entry("start-list", "<file>"),
           Map.entry("start-key", "<key>"),
           Map.entry("play-rounds", "<n>"),
-          Map.entry("scripts", "<player:round:file,...>"));
+          Map.entry("scripts", "<player:round:file,...>"),
+          Map.entry("decisive", "<rounds:tuvLead%:productionLead%>"));
 
   private static String usage() {
     return "Usage: AiMatch "
