@@ -1264,7 +1264,7 @@ public class ProCombatMoveAi {
         if (isFfa == 1 && tuvSwing > 0) {
           tuvSwing *= 0.5;
         }
-        final double lossScale = danLossScale(t);
+        final double lossScale = danLossScale(patd);
         if (lossScale < 1) {
           // DAN_FRONTS: out-producing this front, so an even trade still gains
           final List<Unit> attackers = new ArrayList<>(patd.getUnits());
@@ -2206,11 +2206,17 @@ public class ProCombatMoveAi {
 
   /**
    * DAN_FRONTS: where my side out-produces the front of the territory's owner (rho > 1), my losses
-   * there count 1 / min(rho, 2). 1 otherwise.
+   * in a land attack there count 1 / min(rho, 2). 1 otherwise, and for sea battles and landings.
    */
-  private double danLossScale(final Territory t) {
+  private double danLossScale(final ProTerritory patd) {
+    final Territory t = patd.getTerritory();
     final ProDanModel.Turn turn = proData.getDanTurn();
-    if (turn == null || !proData.hasPatch(ProAiPatch.DAN_FRONTS)) {
+    if (turn == null
+        || !proData.hasPatch(ProAiPatch.DAN_FRONTS)
+        || t.isWater()
+        || patd.isNeedAmphibUnits()
+        || !patd.getAmphibAttackMap().isEmpty()) {
+      // Land trading only: a landing also stakes the transports, which the keep test doesn't count
       return 1;
     }
     final ProDanModel.Front front = turn.fronts().get(t.getOwner().getName());

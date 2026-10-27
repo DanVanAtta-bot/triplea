@@ -128,8 +128,8 @@ public enum ProAiPatch {
   DAN_OBJECTIVES,
   /**
    * Fronts (section 8): per enemy power, the sum of delivered production, TUV traded and pin
-   * balance. Where my side out-produces the front (ratio rho > 1), combat move accepts even trades:
-   * my losses count 1 / min(rho, 2) in the attack keep test.
+   * balance. Where my side out-produces the front (ratio rho > 1), combat move accepts even land
+   * trades: my losses count 1 / min(rho, 2) in the attack keep test (not at sea or for landings).
    */
   DAN_FRONTS,
   /**
