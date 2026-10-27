@@ -138,7 +138,14 @@ public class ProDanModel {
     int strikeRound = NONE;
     if (proData.hasPatch(ProAiPatch.DAN_PLAN)) {
       Plan plan = proData.getDanPlans().get(player.getName());
-      if (plan == null || plan.target() == null || !isEnemyHeld(data, player, plan.target())) {
+      if (theirFreeClock < NONE) {
+        // Re-checked each round: with any enemy clock on my capital I defend first (Dan's decision
+        // order), so no strike plan until it clears
+        plan = new Plan(null, NONE);
+        proData.getDanPlans().put(player.getName(), plan);
+      } else if (plan == null
+          || plan.target() == null
+          || !isEnemyHeld(data, player, plan.target())) {
         plan = makePlan(data, player, round, theirFreeClock);
         proData.getDanPlans().put(player.getName(), plan);
       }
@@ -200,10 +207,11 @@ public class ProDanModel {
   }
 
   /**
-   * Picks the strike at random among the plans that land before the enemies' clock on my capital:
-   * the nearest enemy capital by land from my factories (distance d), struck in round r + d (the
-   * starting units plus this round's buy), r + d + 1 or r + d + 3. No plan if none of these wins
-   * the race or no enemy capital has a land route.
+   * Picks the strike at random among the plans that land before the enemies' clock on my capital
+   * (only called while that clock reads none within the horizon): the nearest enemy capital by land
+   * from my factories (distance d), struck in round r + d (the starting units plus this round's
+   * buy), r + d + 1 or r + d + 3. No plan if none of these wins the race or no enemy capital has a
+   * land route.
    */
   static Plan makePlan(
       final GameData data, final GamePlayer player, final int round, final int theirClock) {

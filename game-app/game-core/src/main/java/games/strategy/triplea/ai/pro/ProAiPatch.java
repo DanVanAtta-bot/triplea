@@ -104,13 +104,14 @@ public enum ProAiPatch {
   STRIKE_TIMED_PURCHASE,
   // AI-1: Dan's strategy model, one gate per component. AI-1 = all DAN_* gates on (see AI1).
   /**
-   * Plan (Dan's model, sections 4 and 10): at its first purchase each player picks a strike, the
-   * nearest enemy capital by land from its factories (distance d), landing at random in round r +
-   * d, r + d + 1 or r + d + 3 among those that beat the enemies' clock on its capital. Until then,
+   * Plan (Dan's model, sections 4 and 10): a player whose capital has no enemy clock (none within
+   * 10 rounds, re-checked each round) picks a strike: the nearest enemy capital by land from its
+   * factories (distance d), landing at random in round r + d, r + d + 1 or r + d + 3. Until then,
    * unless it must defend first (DAN_COOKED's rule), each factory buys only land units that reach
-   * the target by the strike round, the most combat power per PU among them; no offensive navy; and
-   * the target's value is tripled. After the plan's round it strikes only when its clock is 3 or
-   * less and beats the enemies'.
+   * the target by the strike round, the most combat power per PU among them; no offensive navy when
+   * the capital marches on the target; and the target's value is tripled. A player whose capital
+   * gets a clock drops its plan. Without a live plan it strikes only when its clock is 3 or less
+   * and beats the enemies'.
    */
   DAN_PLAN,
   /**
