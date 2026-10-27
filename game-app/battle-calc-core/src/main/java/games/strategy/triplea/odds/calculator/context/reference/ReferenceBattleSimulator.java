@@ -34,7 +34,9 @@ import games.strategy.triplea.odds.calculator.context.seam.RetreatPolicy;
 import games.strategy.triplea.odds.calculator.context.seam.RollGroupResolver;
 import games.strategy.triplea.odds.calculator.context.seam.SupportResolver;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -60,12 +62,17 @@ public class ReferenceBattleSimulator implements BattleSimulator {
   // scenario where neither side can eliminate the other (eg forces that can never target one
   // another) so a run cannot spin forever. Reaching it ends the round loop as a stalemate.
   private static final int MAX_ROUNDS = 100;
+  // Bounds the plan memo of one scenario; past it, new plans are computed but not kept.
+  private static final int PLAN_MEMO_LIMIT = 4096;
 
   private final RollGroupResolver resolver;
   private final SupportResolver supportResolver;
   private final HitRoller roller;
   private final CasualtyAllocator allocator;
   private final CombatRelations relations;
+  // plan() memo for the scenario this simulator is running; one simulator serves one thread.
+  private final Map<PlanKey, BattleRound> planMemo = new HashMap<>();
+  private BattleScenario planMemoScenario;
 
   public ReferenceBattleSimulator() {
     this(new DiceHitRoller());
@@ -258,15 +265,48 @@ public class ReferenceBattleSimulator implements BattleSimulator {
     return attackerWithdrew || defenderWithdrew;
   }
 
+  /**
+   * The resolver's plan, memoized per scenario: runs keep reaching the same forces (every run's
+   * round 1 starts from the same pair), and planning is a pure function of the side, the round and
+   * both forces <em>in iteration order</em> (order decides group and target order, so dice), which
+   * is exactly the key. The plan is only read downstream, so sharing it is safe.
+   */
   private BattleRound plan(
       final BattleScenario scenario,
       final Side side,
       final Map<Key, Integer> firing,
       final Map<Key, Integer> enemy,
       final int round) {
-    return resolver.plan(
-        side, new Force(firing), new Force(enemy), scenario.rules(), scenario.support(), round);
+    if (scenario != planMemoScenario) {
+      planMemo.clear();
+      planMemoScenario = scenario;
+    }
+    final PlanKey key = new PlanKey(side, round, ordered(firing), ordered(enemy));
+    final BattleRound cached = planMemo.get(key);
+    if (cached != null) {
+      return cached;
+    }
+    final BattleRound planned =
+        resolver.plan(
+            side, new Force(firing), new Force(enemy), scenario.rules(), scenario.support(), round);
+    if (planMemo.size() < PLAN_MEMO_LIMIT) {
+      planMemo.put(key, planned);
+    }
+    return planned;
   }
+
+  /** A force's entries in iteration order, as an order-sensitive value. */
+  private static List<Object> ordered(final Map<Key, Integer> force) {
+    final Object[] flat = new Object[force.size() * 2];
+    int i = 0;
+    for (final Map.Entry<Key, Integer> entry : force.entrySet()) {
+      flat[i++] = entry.getKey();
+      flat[i++] = entry.getValue();
+    }
+    return Arrays.asList(flat);
+  }
+
+  private record PlanKey(Side side, int round, List<Object> firing, List<Object> enemy) {}
 
   /** Bins the planned groups whose phase is in {@code wanted} into the matching output lists. */
   private static void collectPhases(
