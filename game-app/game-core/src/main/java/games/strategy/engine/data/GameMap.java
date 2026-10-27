@@ -120,7 +120,15 @@ public class GameMap extends GameDataComponent implements Iterable<Territory> {
    */
   public Set<Territory> getNeighbors(
       final Territory territory, final Predicate<Territory> neighborCondition) {
-    return getNeighbors(territory).stream().filter(neighborCondition).collect(Collectors.toSet());
+    // A plain loop into a HashSet, as Collectors.toSet() built it: route finding calls this for
+    // every territory it expands.
+    final Set<Territory> matches = new HashSet<>();
+    for (final Territory neighbor : getNeighbors(territory)) {
+      if (neighborCondition.test(neighbor)) {
+        matches.add(neighbor);
+      }
+    }
+    return matches;
   }
 
   private Set<Territory> getNeighbors(

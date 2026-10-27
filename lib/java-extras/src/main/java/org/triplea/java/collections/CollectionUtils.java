@@ -50,7 +50,14 @@ public class CollectionUtils {
     if (collection == null) throw new NullPointerException();
     if (predicate == null) throw new NullPointerException();
 
-    return collection.stream().filter(predicate).collect(toArrayList());
+    // A plain loop: this runs on hot AI paths, where stream setup cost more than the filtering.
+    final List<T> matches = new ArrayList<>();
+    for (final T element : collection) {
+      if (predicate.test(element)) {
+        matches.add(element);
+      }
+    }
+    return matches;
   }
 
   /**
