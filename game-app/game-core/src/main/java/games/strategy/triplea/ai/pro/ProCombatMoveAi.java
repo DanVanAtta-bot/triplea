@@ -598,7 +598,7 @@ public class ProCombatMoveAi {
           }
         }
       }
-      if (hasClearZone) {
+      if (hasClearZone || blockedZones.isEmpty() || !isCanOpenerTarget(t)) {
         continue;
       }
       for (final Territory z : blockedZones) {
@@ -618,6 +618,19 @@ public class ProCombatMoveAi {
     }
   }
 
+  /** AMPHIB_CAN_OPENER_VALUABLE: only an enemy capital/factory or a holdable target. */
+  private boolean isCanOpenerTarget(final Territory t) {
+    if (!proData.getPatches().contains(ProAiPatch.AMPHIB_CAN_OPENER_VALUABLE)) {
+      return true;
+    }
+    final ProTerritory patd = territoryManager.getAttackOptions().getTerritoryMap().get(t);
+    final boolean valuable =
+        TerritoryAttachment.get(t).map(TerritoryAttachment::isCapital).orElse(false)
+            || ProMatches.territoryHasInfraFactoryAndIsLand().test(t)
+            || (patd != null && patd.isCanHold());
+    return valuable || !proData.isPatchOn(ProAiPatch.AMPHIB_CAN_OPENER_VALUABLE);
+  }
+
   /** Whether the transport can unload into t from an enemy-free zone or a usable blocked zone. */
   private boolean hasUsableUnloadZone(
       final ProTransport pt, final Territory t, final List<ProTerritory> prioritizedTerritories) {
@@ -627,7 +640,7 @@ public class ProCombatMoveAi {
     for (final Territory z : data.getMap().getNeighbors(t, Matches.territoryIsWater())) {
       if (pt.getSeaTransportMap().containsKey(z)
           && (!pt.getBlockedSeaTerritories().contains(z)
-              || isUsableCanOpenerZone(z, prioritizedTerritories))) {
+              || (isUsableCanOpenerZone(z, prioritizedTerritories) && isCanOpenerTarget(t)))) {
         return true;
       }
     }
@@ -2026,7 +2039,8 @@ public class ProCombatMoveAi {
                       // AMPHIB_CAN_OPENER: only behind a planned, winning sea battle, and only
                       // when no enemy-free zone serves.
                       if (canOpenerZone == null
-                          && isUsableCanOpenerZone(destination, prioritizedTerritories)) {
+                          && isUsableCanOpenerZone(destination, prioritizedTerritories)
+                          && isCanOpenerTarget(t)) {
                         canOpenerZone = destination;
                       }
                       continue;

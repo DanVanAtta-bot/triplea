@@ -1162,10 +1162,26 @@ public class ProTerritoryManager {
                           != null) {
                     continue;
                   }
+                  Set<Territory> blockedUnloads =
+                      map.getNeighbors(blocked, unloadAmphibTerritoryMatch);
+                  if (proData.getPatches().contains(ProAiPatch.AMPHIB_CAN_OPENER_VALUABLE)) {
+                    // Only capitals and factories: a blocked zone's options change the AI's
+                    // estimates (max attackers, amphib priority) even when no landing uses it.
+                    blockedUnloads =
+                        blockedUnloads.stream()
+                            .filter(
+                                t ->
+                                    TerritoryAttachment.get(t)
+                                            .map(TerritoryAttachment::isCapital)
+                                            .orElse(false)
+                                        || ProMatches.territoryHasInfraFactoryAndIsLand().test(t))
+                            .collect(java.util.stream.Collectors.toSet());
+                  }
+                  if (blockedUnloads.isEmpty()) {
+                    continue;
+                  }
                   proTransportData.addBlockedSeaTerritory(
-                      blocked,
-                      map.getNeighbors(blocked, unloadAmphibTerritoryMatch),
-                      loadFromTerritories);
+                      blocked, blockedUnloads, loadFromTerritories);
                 }
               }
             }

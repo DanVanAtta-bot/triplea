@@ -187,6 +187,14 @@ public enum ProAiPatch {
    * enemy-free zones, so a single blocker stops every landing behind it.
    */
   AMPHIB_CAN_OPENER,
+  /**
+   * Narrows {@link #AMPHIB_CAN_OPENER} to landings worth a sea battle: a blocked zone only offers
+   * enemy capitals and factories as targets, and a landing behind it must be a capital, a factory,
+   * or holdable. Without it the UK opens 6 SZ for small landings in Western Europe or Norway that
+   * the German counter-attack retakes, and the extra options change attack estimates even when no
+   * landing uses them. Needs AMPHIB_CAN_OPENER on.
+   */
+  AMPHIB_CAN_OPENER_VALUABLE,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
