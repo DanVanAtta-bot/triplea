@@ -762,7 +762,8 @@ class ProPurchaseAi {
     for (final Territory c :
         CollectionUtils.getMatches(
             data.getMap().getTerritories(),
-            ProMatches.territoryHasNoInfraFactoryAndIsNotConqueredOwnedLand(player))) {
+            ProMatches.territoryHasNoInfraFactoryAndIsNotConqueredOwnedLand(player)
+                .and(ProMatches.territoryIsNotConqueredOnItsBoard()))) {
       if (TerritoryAttachment.getProduction(c) < FACTORY_MIN_PRODUCTION
           || factoryPurchaseTerritories.containsKey(c)
           || data.getMap().getNeighbors(c).stream()
