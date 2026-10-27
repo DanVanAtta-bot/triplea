@@ -172,6 +172,10 @@ class ProNonCombatMoveAi {
                 proData, myCapital, enemyDistanceToMyCapital, player, moveMap)) {
           defenseRange = enemyDistanceToMyCapital - 1;
           territoryManager = territoryManagerCopy;
+          if (proData.isPatchOn(ProAiPatch.NCM_DEFENSIVE_STANCE_FIX)) {
+            // The copy deep-copies its territories: values, moves and doMove must use its map.
+            moveMap = territoryManager.getDefendOptions().getTerritoryMap();
+          }
           ProLogger.debug(
               "Capital doesn't have local land superiority so setting defensive stance");
         } else {

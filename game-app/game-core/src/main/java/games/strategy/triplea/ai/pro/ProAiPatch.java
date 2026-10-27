@@ -157,6 +157,14 @@ public enum ProAiPatch {
    * more, has a land route to the target and no factory of mine next to it, and holds for 2 turns.
    */
   DAN_FACTORY,
+  /**
+   * Bug fix. When non-combat move finds the capital without local land superiority (enemy 2-3
+   * away), it switches to a copy of the territory manager for a defensive second pass, but stock
+   * keeps writing the capital-area values into, and executing the moves of, the first pass's map
+   * (the copy's territories are separate objects), so the defensive stance never takes effect. The
+   * gate re-binds the move map to the copy's. Counts one hit per defensive second pass.
+   */
+  NCM_DEFENSIVE_STANCE_FIX,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
