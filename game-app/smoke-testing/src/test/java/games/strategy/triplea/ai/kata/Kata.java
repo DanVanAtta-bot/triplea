@@ -175,11 +175,15 @@ public final class Kata {
       game.setUpGameForRunningSteps();
     }
     final GameSequence sequence = data.getSequence();
-    while (!game.isGameOver() && sequence.getRound() <= endRound) {
+    // --rounds -1 stops at the end of the tested turn.
+    while (!game.isGameOver() && sequence.getRound() <= Math.max(endRound, startRound)) {
       if (testedTurn && !tested.equals(sequence.getStep().getPlayerId())) {
         testedTurn = false;
         ai.setTestedTurn(false);
         score.markEndOfTestedTurn();
+        if (extraRounds < 0) {
+          break;
+        }
       }
       scoredStep(game, score, game::runNextStep);
     }
