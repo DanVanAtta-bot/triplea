@@ -165,6 +165,28 @@ public enum ProAiPatch {
    * gate re-binds the move map to the copy's. Counts one hit per defensive second pass.
    */
   NCM_DEFENSIVE_STANCE_FIX,
+  /**
+   * Combat move: once the worth-it check has dropped an attack, retries the amphibious attacks that
+   * target selection removed while that attack was still planned, in attack-value order, highest
+   * value first, keeping each one only if every planned attack still succeeds. Stock removes the
+   * newest target whenever the set fails, even when the failing target is an earlier one that is
+   * later dropped, so the freed units and transports idle (eg: a capital in reach of loaded
+   * transports is skipped for a doomed attack on another capital).
+   */
+  AMPHIB_READD_DROPPED,
+  /**
+   * Variant of {@link #AMPHIB_READD_DROPPED} that retries every land target selection removed, not
+   * only amphibious ones. Needs AMPHIB_READD_DROPPED on.
+   */
+  ATTACK_READD_DROPPED,
+  /**
+   * Combat move: a transport may end its move in a sea zone holding enemy units and unload from it
+   * (an amphibious assault behind a sea battle, which the engine allows), if that zone is itself
+   * attacked in the same combat move and wins at least {@code winPercentage}. The blocked zone is
+   * tried before the landings that need it. Stock only moves transports through and unloads from
+   * enemy-free zones, so a single blocker stops every landing behind it.
+   */
+  AMPHIB_CAN_OPENER,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

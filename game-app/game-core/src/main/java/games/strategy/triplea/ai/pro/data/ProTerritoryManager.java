@@ -9,6 +9,7 @@ import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.Unit;
 import games.strategy.engine.data.util.BreadthFirstSearch;
 import games.strategy.triplea.Properties;
+import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
@@ -1134,6 +1135,40 @@ public class ProTerritoryManager {
             // Add to transport map
             proTransportData.addTerritories(unloadTerritories, loadFromTerritories);
             proTransportData.addSeaTerritories(seaMoveTerritories, loadFromTerritories);
+
+            // AMPHIB_CAN_OPENER: a zone with enemy units, one step past an enemy-free route, can
+            // be the unload zone if the combat move also attacks it (checked when planning).
+            if (isCombatMove
+                && !isCheckingEnemyAttacks
+                && !isIgnoringRelationships
+                && movesLeft > 0
+                && proData.getPatches().contains(ProAiPatch.AMPHIB_CAN_OPENER)) {
+              final Predicate<Territory> canEnterForBattle =
+                  canMoveSea.and(canMoveSeaThrough.negate());
+              for (final Territory to : seaMoveTerritories) {
+                final int stepsToZone =
+                    to.equals(from)
+                        ? 0
+                        : map.getRouteForUnit(from, to, canMoveSeaThrough, transport, player)
+                            .map(Route::numberOfSteps)
+                            .orElse(Integer.MAX_VALUE);
+                if (stepsToZone >= movesLeft) {
+                  continue;
+                }
+                for (final Territory blocked : map.getNeighbors(to, canEnterForBattle)) {
+                  if (!blocked.isWater()
+                      || moveValidator.validateCanal(
+                              new Route(to, blocked), List.of(transport), player)
+                          != null) {
+                    continue;
+                  }
+                  proTransportData.addBlockedSeaTerritory(
+                      blocked,
+                      map.getNeighbors(blocked, unloadAmphibTerritoryMatch),
+                      loadFromTerritories);
+                }
+              }
+            }
           }
           currentTerritories.clear();
           currentTerritories.addAll(nextTerritories);

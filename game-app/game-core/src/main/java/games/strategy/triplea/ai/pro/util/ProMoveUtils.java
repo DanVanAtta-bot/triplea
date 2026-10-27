@@ -9,6 +9,7 @@ import games.strategy.engine.data.Route;
 import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.Unit;
 import games.strategy.triplea.ai.AbstractAi;
+import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.ai.pro.data.ProTerritory;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.triplea.util.Tuple;
@@ -218,6 +220,35 @@ public final class ProMoveUtils {
           int distanceFromEnd = map.getDistance(transportTerritory, t);
           if (t.isWater()) {
             distanceFromEnd++;
+          }
+          final Predicate<Territory> canMoveSeaThrough =
+              ProMatches.territoryCanMoveSeaUnitsThrough(player, isCombatMove);
+          if (isCombatMove
+              && movesLeft > 0
+              && remainingUnitsToLoad.isEmpty()
+              && unloadTerritory != null
+              && !unloadTerritory.equals(transportTerritory)
+              && unloadTerritory.isWater()
+              && !canMoveSeaThrough.test(unloadTerritory)
+              && proData.getPatches().contains(ProAiPatch.AMPHIB_CAN_OPENER)) {
+            // AMPHIB_CAN_OPENER: sail into the blocked unload zone the combat move attacks.
+            final Optional<Route> route =
+                map.getRouteForUnit(
+                    transportTerritory,
+                    unloadTerritory,
+                    canMoveSeaThrough.or(unloadTerritory::equals),
+                    transport,
+                    player);
+            if (route.isPresent() && route.get().numberOfSteps() <= movesLeft) {
+              final Territory next = route.get().getSteps().get(0);
+              final var unitsToMove = new ArrayList<Unit>();
+              unitsToMove.add(transport);
+              unitsToMove.addAll(loadedUnits);
+              moves.addMove(unitsToMove, new Route(transportTerritory, next));
+              transportTerritory = next;
+              movesLeft--;
+              continue;
+            }
           }
           if (movesLeft > 0
               && (distanceFromEnd > 1

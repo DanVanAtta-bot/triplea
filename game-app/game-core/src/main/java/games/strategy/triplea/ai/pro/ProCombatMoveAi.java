@@ -107,7 +107,8 @@ public class ProCombatMoveAi {
     final List<ProTerritory> consideredAttacks = List.copyOf(attackOptions);
 
     // Determine which territories to attack
-    determineTerritoriesToAttack(attackOptions);
+    final List<ProTerritory> removedBySelection = new ArrayList<>();
+    determineTerritoriesToAttack(attackOptions, removedBySelection);
 
     // Determine which territories can be held and remove any that aren't worth attacking
     clearedTerritories = new ArrayList<>();
@@ -127,7 +128,12 @@ public class ProCombatMoveAi {
     // Determine how many units to attack each territory with
     final List<Unit> alreadyMovedUnits =
         moveOneDefenderToLandTerritoriesBorderingEnemy(attackOptions);
+    final List<ProTerritory> beforeWorthCheck = new ArrayList<>(attackOptions);
     determineUnitsToAttackWith(attackOptions, alreadyMovedUnits);
+    if (proData.getPatches().contains(ProAiPatch.AMPHIB_READD_DROPPED)) {
+      readdRemovedAmphibAttacks(
+          attackOptions, beforeWorthCheck, removedBySelection, alreadyMovedUnits);
+    }
 
     // Get all transport final territories
     ProMoveUtils.calculateAmphibRoutes(
@@ -144,6 +150,10 @@ public class ProCombatMoveAi {
 
     // Check if any subs in contested territory that's not being attacked
     checkContestedSeaTerritories();
+
+    if (proData.getPatches().contains(ProAiPatch.AMPHIB_CAN_OPENER)) {
+      dropLandingsBehindUnfoughtZones();
+    }
 
     reportCombatMovePlan(consideredAttacks);
 
@@ -424,9 +434,13 @@ public class ProCombatMoveAi {
     }
   }
 
-  private void determineTerritoriesToAttack(final List<ProTerritory> prioritizedTerritories) {
+  private void determineTerritoriesToAttack(
+      final List<ProTerritory> prioritizedTerritories, final List<ProTerritory> removed) {
 
     ProLogger.info("Determine which territories to attack");
+    if (proData.getPatches().contains(ProAiPatch.AMPHIB_CAN_OPENER)) {
+      promoteCanOpenerZones(prioritizedTerritories);
+    }
 
     // Assign units to territories by prioritization
     int numToAttack = Math.min(1, prioritizedTerritories.size());
@@ -481,6 +495,7 @@ public class ProCombatMoveAi {
             }
           }
           prioritizedTerritories.removeAll(amphibTerritoriesToRemove);
+          removed.addAll(amphibTerritoriesToRemove);
           haveRemovedAllAmphibTerritories = true;
         }
 
@@ -493,13 +508,192 @@ public class ProCombatMoveAi {
         ProLogger.debug(
             "Removing territory: "
                 + prioritizedTerritories.get(numToAttack - 1).getTerritory().getName());
-        prioritizedTerritories.remove(numToAttack - 1);
+        removed.add(prioritizedTerritories.remove(numToAttack - 1));
         if (numToAttack > prioritizedTerritories.size()) {
           numToAttack--;
         }
       }
     }
     ProLogger.debug("Final number of territories: " + (numToAttack - 1));
+  }
+
+  /**
+   * AMPHIB_READD_DROPPED: once the worth-it check has dropped an attack, retries the amphibious
+   * targets that selection removed while that attack was still planned. Each is kept only if every
+   * planned attack still succeeds with it and it gets transported units.
+   */
+  private void readdRemovedAmphibAttacks(
+      final List<ProTerritory> attackOptions,
+      final List<ProTerritory> beforeWorthCheck,
+      final List<ProTerritory> removedBySelection,
+      final List<Unit> alreadyMovedUnits) {
+    final List<ProTerritory> dropped = new ArrayList<>(beforeWorthCheck);
+    dropped.removeAll(attackOptions);
+    if (dropped.isEmpty()) {
+      return;
+    }
+    final List<ProTerritory> candidates = new ArrayList<>();
+    final boolean anyTarget = proData.getPatches().contains(ProAiPatch.ATTACK_READD_DROPPED);
+    for (final ProTerritory patd : removedBySelection) {
+      if ((anyTarget || patd.isNeedAmphibUnits())
+          && !patd.getTerritory().isWater()
+          && !dropped.contains(patd)
+          && !attackOptions.contains(patd)
+          && !candidates.contains(patd)) {
+        candidates.add(patd);
+      }
+    }
+    if (candidates.isEmpty()) {
+      return;
+    }
+    candidates.sort(Comparator.comparingDouble(ProTerritory::getValue).reversed());
+    for (final ProTerritory candidate : candidates) {
+      attackOptions.add(candidate);
+      tryToAttackTerritories(attackOptions, alreadyMovedUnits);
+      if (allAttacksSucceed(attackOptions)
+          && (!candidate.getAmphibAttackMap().isEmpty()
+              || (anyTarget && !candidate.getUnits().isEmpty()))
+          && proData.isPatchOn(
+              candidate.getAmphibAttackMap().isEmpty()
+                  ? ProAiPatch.ATTACK_READD_DROPPED
+                  : ProAiPatch.AMPHIB_READD_DROPPED)) {
+        ProLogger.debug(
+            "AMPHIB_READD_DROPPED: re-added "
+                + candidate.getTerritory().getName()
+                + " after dropping "
+                + dropped.stream().map(p -> p.getTerritory().getName()).toList());
+      } else {
+        attackOptions.remove(candidate);
+      }
+    }
+    // The trials reset every assignment; plan the final set again.
+    determineUnitsToAttackWith(attackOptions, alreadyMovedUnits);
+  }
+
+  /**
+   * AMPHIB_CAN_OPENER: moves a blocked sea zone ahead of a land target that transports can reach
+   * only by unloading from it, so the sea battle is planned before the landing that needs it.
+   */
+  private void promoteCanOpenerZones(final List<ProTerritory> prioritizedTerritories) {
+    final List<ProTransport> transports = territoryManager.getAttackOptions().getTransportList();
+    for (int i = 0; i < prioritizedTerritories.size(); i++) {
+      final Territory t = prioritizedTerritories.get(i).getTerritory();
+      if (t.isWater()) {
+        continue;
+      }
+      final Set<Territory> blockedZones = new LinkedHashSet<>();
+      boolean hasClearZone = false;
+      for (final ProTransport pt : transports) {
+        if (!pt.getTransportMap().containsKey(t)) {
+          continue;
+        }
+        for (final Territory z : data.getMap().getNeighbors(t, Matches.territoryIsWater())) {
+          if (!pt.getSeaTransportMap().containsKey(z)) {
+            continue;
+          }
+          if (pt.getBlockedSeaTerritories().contains(z)) {
+            blockedZones.add(z);
+          } else {
+            hasClearZone = true;
+          }
+        }
+      }
+      if (hasClearZone) {
+        continue;
+      }
+      for (final Territory z : blockedZones) {
+        int zi = -1;
+        for (int j = i + 1; j < prioritizedTerritories.size(); j++) {
+          if (prioritizedTerritories.get(j).getTerritory().equals(z)) {
+            zi = j;
+            break;
+          }
+        }
+        if (zi > i && proData.isPatchOn(ProAiPatch.AMPHIB_CAN_OPENER)) {
+          prioritizedTerritories.add(i, prioritizedTerritories.remove(zi));
+          ProLogger.debug("AMPHIB_CAN_OPENER: attack " + z + " before " + t);
+          i++;
+        }
+      }
+    }
+  }
+
+  /** Whether the transport can unload into t from an enemy-free zone or a usable blocked zone. */
+  private boolean hasUsableUnloadZone(
+      final ProTransport pt, final Territory t, final List<ProTerritory> prioritizedTerritories) {
+    if (pt.getBlockedSeaTerritories().isEmpty()) {
+      return true;
+    }
+    for (final Territory z : data.getMap().getNeighbors(t, Matches.territoryIsWater())) {
+      if (pt.getSeaTransportMap().containsKey(z)
+          && (!pt.getBlockedSeaTerritories().contains(z)
+              || isUsableCanOpenerZone(z, prioritizedTerritories))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A blocked zone is usable if it is planned as an attack that wins at least winPercentage. */
+  private boolean isUsableCanOpenerZone(
+      final Territory z, final List<ProTerritory> prioritizedTerritories) {
+    final ProTerritory zone = territoryManager.getAttackOptions().getTerritoryMap().get(z);
+    if (zone == null || !prioritizedTerritories.contains(zone) || zone.getUnits().isEmpty()) {
+      return false;
+    }
+    if (zone.getBattleResult() == null) {
+      zone.estimateBattleResult(calc, player);
+    }
+    final ProBattleResult result = zone.getBattleResult();
+    return result.getWinPercentage() >= proData.getWinPercentage()
+        && result.isHasLandUnitRemaining();
+  }
+
+  /**
+   * AMPHIB_CAN_OPENER: drops a landing whose transports would end in an enemy-held sea zone that
+   * the final plan no longer attacks (eg removed to keep the capital safe).
+   */
+  private void dropLandingsBehindUnfoughtZones() {
+    final Map<Territory, ProTerritory> attackMap =
+        territoryManager.getAttackOptions().getTerritoryMap();
+    final Predicate<Territory> clear = ProMatches.territoryCanMoveSeaUnitsThrough(player, true);
+    for (final ProTerritory patd : attackMap.values()) {
+      if (patd.getTerritory().isWater() || patd.getAmphibAttackMap().isEmpty()) {
+        continue;
+      }
+      for (final Territory z : patd.getTransportTerritoryMap().values()) {
+        final ProTerritory zone = attackMap.get(z);
+        if (z.isWater() && !clear.test(z) && (zone == null || zone.getUnits().isEmpty())) {
+          ProLogger.debug(
+              "AMPHIB_CAN_OPENER: dropping " + patd.getTerritory() + ", " + z + " not attacked");
+          patd.getUnits().clear();
+          patd.getAmphibAttackMap().clear();
+          patd.getBombardTerritoryMap().clear();
+          patd.getTransportTerritoryMap().clear();
+          break;
+        }
+      }
+    }
+  }
+
+  /** The success test of {@link #determineTerritoriesToAttack} for the current assignment. */
+  private boolean allAttacksSucceed(final List<ProTerritory> territories) {
+    for (final ProTerritory patd : territories) {
+      if (patd.getBattleResult() == null) {
+        patd.estimateBattleResult(calc, player);
+      }
+      final double estimate =
+          ProBattleUtils.estimateStrengthDifference(
+              patd.getTerritory(), patd.getUnits(), patd.getMaxEnemyDefenders(player));
+      final ProBattleResult result = patd.getBattleResult();
+      if (!patd.isStrafing()
+          && estimate < patd.getStrengthEstimate()
+          && (result.getWinPercentage() < proData.getMinWinPercentage()
+              || !result.isHasLandUnitRemaining())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private void determineTerritoriesThatCanBeHeld(
@@ -1765,7 +1959,9 @@ public class ProCombatMoveAi {
       // Find number of attack options
       final Set<Territory> canAmphibAttackTerritories = new HashSet<>();
       for (final ProTerritory attackTerritoryData : prioritizedTerritories) {
-        if (proTransportData.getTransportMap().containsKey(attackTerritoryData.getTerritory())) {
+        if (proTransportData.getTransportMap().containsKey(attackTerritoryData.getTerritory())
+            && hasUsableUnloadZone(
+                proTransportData, attackTerritoryData.getTerritory(), prioritizedTerritories)) {
           canAmphibAttackTerritories.add(attackTerritoryData.getTerritory());
         }
       }
@@ -1819,12 +2015,22 @@ public class ProCombatMoveAi {
                 for (final Unit u : amphibUnitsToAdd) {
                   loadFromTerritories.add(proData.getUnitTerritory(u));
                 }
+                Territory canOpenerZone = null;
                 for (final Territory destination : territoriesToMoveTransport) {
                   if (proTransportData.getSeaTransportMap().containsKey(destination)
                       && proTransportData
                           .getSeaTransportMap()
                           .get(destination)
                           .containsAll(loadFromTerritories)) {
+                    if (proTransportData.getBlockedSeaTerritories().contains(destination)) {
+                      // AMPHIB_CAN_OPENER: only behind a planned, winning sea battle, and only
+                      // when no enemy-free zone serves.
+                      if (canOpenerZone == null
+                          && isUsableCanOpenerZone(destination, prioritizedTerritories)) {
+                        canOpenerZone = destination;
+                      }
+                      continue;
+                    }
                     Set<Unit> attackers = Set.of();
                     if (enemyAttackOptions.getMax(destination) != null) {
                       attackers = enemyAttackOptions.getMax(destination).getMaxUnits();
@@ -1840,6 +2046,13 @@ public class ProCombatMoveAi {
                       minUnloadFromTerritory = destination;
                     }
                   }
+                }
+                if (minUnloadFromTerritory == null
+                    && canOpenerZone != null
+                    && proData.isPatchOn(ProAiPatch.AMPHIB_CAN_OPENER)) {
+                  minUnloadFromTerritory = canOpenerZone;
+                  ProLogger.debug(
+                      "AMPHIB_CAN_OPENER: " + t.getName() + " unloads from " + canOpenerZone);
                 }
                 minWinTerritory = t;
                 minWinPercentage = result.getWinPercentage();
