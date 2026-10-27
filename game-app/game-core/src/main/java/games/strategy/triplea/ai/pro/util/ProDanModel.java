@@ -110,6 +110,11 @@ public class ProDanModel {
             ? NONE
             : clock(data, enemies, capital, false, enemyPinned);
 
+    // A strike commits the army that casts my pins, so plans race the enemies' unpinned clock
+    final int theirFreeClock =
+        enemyPinned.isEmpty() || capital == null || !capital.isOwnedBy(player)
+            ? theirClock
+            : clock(data, enemies, capital, false, Set.of());
     final Set<Unit> myPinned = pinsOn ? pins(data, enemies, alliance).held() : Set.of();
     Territory clockTarget = null;
     int myClock = NONE;
@@ -126,7 +131,7 @@ public class ProDanModel {
     if (proData.hasPatch(ProAiPatch.DAN_PLAN)) {
       Plan plan = proData.getDanPlans().get(player.getName());
       if (plan == null || plan.target() == null || !isEnemyHeld(data, player, plan.target())) {
-        plan = makePlan(data, player, round, theirClock);
+        plan = makePlan(data, player, round, theirFreeClock);
         proData.getDanPlans().put(player.getName(), plan);
       }
       if (plan.target() != null && plan.strikeRound() > round) {
@@ -241,16 +246,16 @@ public class ProDanModel {
 
   /**
    * Income-worthwhile test for a non-objective territory: its income counts only for the rounds it
-   * can still turn into force before the decisive round (captured now, spent next turn, a round to
-   * reach the fight). Returns the share of the stock 3-round worth that remains, at least 0.1; 1
-   * for objectives or with no reading.
+   * can still turn into force before the decisive round (captured now, spent next turn). Returns
+   * the share of the stock 3-round worth that remains, at least 0.1; 1 for objectives or with no
+   * reading.
    */
   public static double incomeFactor(final ProData proData, final Territory t) {
     final Turn turn = proData.getDanTurn();
     if (turn == null || !proData.hasPatch(ProAiPatch.DAN_OBJECTIVES) || isObjective(t)) {
       return 1;
     }
-    final double rounds = turn.decideRound() - turn.round() - 2;
+    final double rounds = turn.decideRound() - turn.round() - 1;
     final double factor = Math.max(0.1, Math.min(1, rounds / 3));
     if (factor < 1) {
       proData.isPatchOn(ProAiPatch.DAN_OBJECTIVES);
