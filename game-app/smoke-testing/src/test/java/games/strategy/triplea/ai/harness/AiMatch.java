@@ -17,6 +17,7 @@ import games.strategy.triplea.ai.kata.KataAi;
 import games.strategy.triplea.ai.kata.KataScript;
 import games.strategy.triplea.ai.pro.ProAi;
 import games.strategy.triplea.ai.pro.ProAiPatch;
+import games.strategy.triplea.ai.pro.ProAiPatchSpec;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.EndRoundDelegate;
 import games.strategy.triplea.settings.ClientSetting;
@@ -27,9 +28,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +64,10 @@ import javax.annotation.Nullable;
  * this JVM, so later games run on JIT-compiled code; each game prints its own RESULT, then a
  * GAME_CPU line with the process CPU seconds it used.
  *
+ * <p>A patch in {@code --patches} or {@code --baseline-patches} may be scoped, {@code P1@Axis} or
+ * {@code P1@Germans+Japanese} (terms sorted): it is on only for players in that alliance or those
+ * powers, see {@link ProAiPatchSpec}. Scripted players take every patch of their side.
+ *
  * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
  * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
  * rebuilds a forum-save position and plays on from it instead of the map's start, without the
@@ -79,8 +82,8 @@ public final class AiMatch {
     final Map<String, String> opts = parseArgs(args);
     final String map = opts.getOrDefault("map", "big_world_1942.xml");
     final int roundCap = Integer.parseInt(opts.getOrDefault("rounds", "30"));
-    final Set<ProAiPatch> patches = parsePatches(opts.getOrDefault("patches", "NO_OP"));
-    final Set<ProAiPatch> baselinePatches =
+    final List<ProAiPatchSpec> patches = parsePatches(opts.getOrDefault("patches", "NO_OP"));
+    final List<ProAiPatchSpec> baselinePatches =
         parsePatches(opts.getOrDefault("baseline-patches", "none"));
     final FixedBid bid = opts.containsKey("bid") ? FixedBid.load(Path.of(opts.get("bid"))) : null;
     final String patchedAlliance = opts.getOrDefault("patched", "Axis");
@@ -107,8 +110,9 @@ public final class AiMatch {
     runConfig.put("map", map);
     runConfig.put("round_cap", roundCap);
     runConfig.put("calc", calc);
-    runConfig.put("patches", patches.stream().map(Enum::name).sorted().toList());
-    runConfig.put("baseline_patches", baselinePatches.stream().map(Enum::name).sorted().toList());
+    runConfig.put("patches", patches.stream().map(ProAiPatchSpec::label).sorted().toList());
+    runConfig.put(
+        "baseline_patches", baselinePatches.stream().map(ProAiPatchSpec::label).sorted().toList());
     runConfig.put("tech_development", false);
     runConfig.put("props", props);
     final Long seed = opts.containsKey("seed") ? Long.parseLong(opts.get("seed")) : null;
@@ -188,8 +192,8 @@ public final class AiMatch {
   private static void playOne(
       final String map,
       final int roundCap,
-      final Set<ProAiPatch> patches,
-      final Set<ProAiPatch> baselinePatches,
+      final List<ProAiPatchSpec> patches,
+      final List<ProAiPatchSpec> baselinePatches,
       @Nullable final FixedBid bid,
       final String patchedAlliance,
       final Path outRoot,
@@ -240,7 +244,8 @@ public final class AiMatch {
       variantBySide.put(side, isPatched ? "patched" : "baseline");
       patchesBySide.put(
           side,
-          (onPatchedSide ? patches : baselinePatches).stream().map(Enum::name).sorted().toList());
+          (onPatchedSide ? patches : baselinePatches)
+              .stream().map(ProAiPatchSpec::label).sorted().toList());
     }
     final Map<String, Object> config = new LinkedHashMap<>(runConfig);
     config.put("patched_alliance", patchedAlliance);
@@ -368,8 +373,8 @@ public final class AiMatch {
   private static void playFromHuman(
       final String map,
       final int roundCap,
-      final Set<ProAiPatch> patches,
-      final Set<ProAiPatch> baselinePatches,
+      final List<ProAiPatchSpec> patches,
+      final List<ProAiPatchSpec> baselinePatches,
       final String patchedAlliance,
       final Path outRoot,
       final HumanStart start,
@@ -536,7 +541,7 @@ public final class AiMatch {
 
   private static PlayerTypes.Type proAiType(
       final String label,
-      final Set<ProAiPatch> patches,
+      final List<ProAiPatchSpec> patches,
       final List<ProAi> created,
       final DecisionLog decisionLog,
       final Set<String> scriptedNames,
@@ -546,11 +551,13 @@ public final class AiMatch {
       public Player newPlayerWithName(final String name) {
         final ProAi ai;
         if (scriptedNames.contains(name)) {
-          final KataAi kataAi = new KataAi(name, patches, patches, null);
+          // A scripted player takes every patch of its side; scopes are not applied to it.
+          final Set<ProAiPatch> unscoped = ProAiPatchSpec.patches(patches);
+          final KataAi kataAi = new KataAi(name, unscoped, unscoped, null);
           scripted.put(name, kataAi);
           ai = kataAi;
         } else {
-          ai = new ProAi(name, getLabel(), patches);
+          ai = ProAi.withPatchSpecs(name, getLabel(), patches);
         }
         ai.setDecisionListener(decisionLog);
         created.add(ai);
@@ -560,15 +567,15 @@ public final class AiMatch {
   }
 
   /** Side to player to patch hits, for every player that has patches; every side is a key. */
-  private static Map<String, Map<String, Map<ProAiPatch, Integer>>> patchHitsBySide(
+  private static Map<String, Map<String, Map<String, Integer>>> patchHitsBySide(
       final GameData data, final List<ProAi> ais, final Collection<String> sides) {
-    final Map<String, Map<String, Map<ProAiPatch, Integer>>> hits = new TreeMap<>();
+    final Map<String, Map<String, Map<String, Integer>>> hits = new TreeMap<>();
     sides.forEach(side -> hits.put(side, new TreeMap<>()));
     for (final ProAi ai : ais) {
       if (!ai.getProData().getPatches().isEmpty()) {
         final GamePlayer player = data.getPlayerList().getPlayerId(ai.getName());
         hits.computeIfAbsent(allianceOf(player), k -> new TreeMap<>())
-            .put(ai.getName(), new TreeMap<>(ai.getProData().getPatchHits()));
+            .put(ai.getName(), ai.getProData().getPatchHitsByLabel());
       }
     }
     return hits;
@@ -696,16 +703,8 @@ public final class AiMatch {
     return scripts;
   }
 
-  private static Set<ProAiPatch> parsePatches(final String value) {
-    if (value.equalsIgnoreCase("none")) {
-      return Set.of();
-    }
-    final Set<ProAiPatch> patches = EnumSet.noneOf(ProAiPatch.class);
-    Arrays.stream(value.split(","))
-        .map(String::trim)
-        .map(ProAiPatch::valueOf)
-        .forEach(patches::add);
-    return patches;
+  private static List<ProAiPatchSpec> parsePatches(final String value) {
+    return ProAiPatchSpec.parseList(value);
   }
 
   /** Every flag main() reads, with its value placeholder; an empty placeholder takes no value. */

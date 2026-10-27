@@ -17,10 +17,22 @@ public class ProAi extends AbstractProAi {
   }
 
   public ProAi(final String name, final String playerLabel, final Collection<ProAiPatch> patches) {
-    super(name, concurrentCalc, new ProData(patches), playerLabel);
+    this(name, playerLabel, new ProData(patches));
+  }
+
+  private ProAi(final String name, final String playerLabel, final ProData proData) {
+    super(name, concurrentCalc, proData, playerLabel);
     // cuncurrentCalc is static so that it can be shared across all ProAi instances
     // at the end of a game, it needs to be cleared up
     GameShutdownRegistry.registerShutdownAction(() -> concurrentCalc.setGameData(null));
+  }
+
+  /**
+   * A Hard AI with scoped patches, eg: {@code AMPHIB_CAN_OPENER@Axis}; see {@link ProAiPatchSpec}.
+   */
+  public static ProAi withPatchSpecs(
+      final String name, final String playerLabel, final Collection<ProAiPatchSpec> specs) {
+    return new ProAi(name, playerLabel, ProData.withPatchSpecs(specs));
   }
 
   @Override
