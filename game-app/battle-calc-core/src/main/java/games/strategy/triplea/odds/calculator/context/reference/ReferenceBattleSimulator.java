@@ -70,9 +70,11 @@ public class ReferenceBattleSimulator implements BattleSimulator {
   private final HitRoller roller;
   private final CasualtyAllocator allocator;
   private final CombatRelations relations;
-  // plan() memo for the scenario this simulator is running; one simulator serves one thread.
+  // Memos of pure per-round computations for the scenario this simulator is running (memoScenario);
+  // one simulator serves one thread.
   private final Map<PlanKey, BattleRound> planMemo = new HashMap<>();
-  private BattleScenario planMemoScenario;
+  private final Map<MarginalKey, Map<CombatProfile, Integer>> marginalMemo = new HashMap<>();
+  private BattleScenario memoScenario;
 
   public ReferenceBattleSimulator() {
     this(new DiceHitRoller());
@@ -94,6 +96,11 @@ public class ReferenceBattleSimulator implements BattleSimulator {
   @Override
   public SimulationResults simulate(
       final BattleScenario scenario, final int runCount, final RandomSource rng) {
+    if (scenario != memoScenario) {
+      planMemo.clear();
+      marginalMemo.clear();
+      memoScenario = scenario;
+    }
     final ProfileStats stats = new ProfileStats(costByProfile(scenario));
     final List<BattleResult> results = new ArrayList<>(runCount);
     for (int run = 0; run < runCount; run++) {
@@ -277,11 +284,8 @@ public class ReferenceBattleSimulator implements BattleSimulator {
       final Map<Key, Integer> firing,
       final Map<Key, Integer> enemy,
       final int round) {
-    if (scenario != planMemoScenario) {
-      planMemo.clear();
-      planMemoScenario = scenario;
-    }
-    final PlanKey key = new PlanKey(side, round, ordered(firing), ordered(enemy));
+    final PlanKey key =
+        new PlanKey(side, planRound(firing, round), ordered(firing), ordered(enemy));
     final BattleRound cached = planMemo.get(key);
     if (cached != null) {
       return cached;
@@ -295,6 +299,21 @@ public class ReferenceBattleSimulator implements BattleSimulator {
     return planned;
   }
 
+  /**
+   * The round as far as planning can tell it apart: support only distinguishes round 1, and an AA
+   * gun only whether the round is past its last firing round. Every round past both plans alike.
+   */
+  private static int planRound(final Map<Key, Integer> firing, final int round) {
+    int lastDistinct = 1;
+    for (final Key key : firing.keySet()) {
+      final CombatProfile profile = key.profile();
+      if (profile.flags().contains(CombatFlag.IS_AA)) {
+        lastDistinct = Math.max(lastDistinct, profile.maxRoundsAa());
+      }
+    }
+    return Math.min(round, lastDistinct + 1);
+  }
+
   /** A force's entries in iteration order, as an order-sensitive value. */
   private static List<Object> ordered(final Map<Key, Integer> force) {
     final Object[] flat = new Object[force.size() * 2];
@@ -306,7 +325,21 @@ public class ReferenceBattleSimulator implements BattleSimulator {
     return Arrays.asList(flat);
   }
 
+  /** A profile-count map's entries in iteration order, as an order-sensitive value. */
+  private static List<Object> orderedCounts(final Map<CombatProfile, Integer> counts) {
+    final Object[] flat = new Object[counts.size() * 2];
+    int i = 0;
+    for (final Map.Entry<CombatProfile, Integer> entry : counts.entrySet()) {
+      flat[i++] = entry.getKey();
+      flat[i++] = entry.getValue();
+    }
+    return Arrays.asList(flat);
+  }
+
   private record PlanKey(Side side, int round, List<Object> firing, List<Object> enemy) {}
+
+  private record MarginalKey(
+      Side side, boolean firstRound, List<Object> target, List<Object> enemy) {}
 
   /** Bins the planned groups whose phase is in {@code wanted} into the matching output lists. */
   private static void collectPhases(
@@ -1063,6 +1096,29 @@ public class ReferenceBattleSimulator implements BattleSimulator {
     if (target.isEmpty()) {
       return Map.of();
     }
+    // Support depends on the round only through firstRoundOnly rules, so round 1 and "later" are
+    // the only distinct cases; support and diceSides are fixed per scenario.
+    final MarginalKey key =
+        new MarginalKey(side, round == 1, orderedCounts(target), ordered(enemy.counts()));
+    final Map<CombatProfile, Integer> cached = marginalMemo.get(key);
+    if (cached != null) {
+      return cached;
+    }
+    final Map<CombatProfile, Integer> computed =
+        computeMarginalPowerLoss(target, enemy, side, support, round, diceSides);
+    if (marginalMemo.size() < PLAN_MEMO_LIMIT) {
+      marginalMemo.put(key, computed);
+    }
+    return computed;
+  }
+
+  private Map<CombatProfile, Integer> computeMarginalPowerLoss(
+      final Map<CombatProfile, Integer> target,
+      final Force enemy,
+      final Side side,
+      final List<SupportRule> support,
+      final int round,
+      final int diceSides) {
     final int full = resolvedPower(target, enemy, side, support, round, diceSides);
     final Map<CombatProfile, Integer> marginal = new LinkedHashMap<>();
     for (final CombatProfile profile : target.keySet()) {
