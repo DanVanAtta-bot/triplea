@@ -143,9 +143,10 @@ public enum ProAiPatch {
    * Supply lines (Dan's A6/A7): strength each side can have at a territory by each turn, from units
    * on the board, then purchases from the factories feeding it (capped by their production; a
    * factory with no land route only through a transport shuttle with naval dominance on the route),
-   * with pinned slow units left behind. Replaces the kill-strike clocks of the other DAN gates,
-   * sets each front's delivery delay, and scales a non-objective capture's worth in combat by the
-   * turns (of 3) my arrival there keeps up with the enemies'.
+   * with pinned slow units left behind. Replaces my own kill-strike clocks in the other DAN gates
+   * (the enemies' clock on my capital stays the classic one), sets each front's delivery delay, and
+   * scales a non-objective capture's worth in combat by the turns (of 3) my arrival there keeps up
+   * with the enemies'.
    */
   DAN_SUPPLY,
   /**

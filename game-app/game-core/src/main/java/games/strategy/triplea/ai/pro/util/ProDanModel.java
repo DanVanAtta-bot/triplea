@@ -109,16 +109,20 @@ public class ProDanModel {
     final Territory capital =
         TerritoryAttachment.getFirstOwnedCapitalOrFirstUnownedCapital(player, data.getMap())
             .orElse(null);
+    // "Am I cooked" uses the classic clock, validated on recorded games (at a reading of 2 Moscow
+    // falls within 2 rounds 73% of the time); the supply clock credits every allied unit and buy
+    // that
+    // can reach my capital and reads too safe. DAN_SUPPLY still times my own strike.
     final int theirClock =
         capital == null || !capital.isOwnedBy(player)
             ? NONE
-            : clock(data, enemies, capital, false, enemyPinned, supplyOn);
+            : clock(data, enemies, capital, false, enemyPinned, false);
 
     // A strike commits the army that casts my pins, so plans race the enemies' unpinned clock
     final int theirFreeClock =
         enemyPinned.isEmpty() || capital == null || !capital.isOwnedBy(player)
             ? theirClock
-            : clock(data, enemies, capital, false, Set.of(), supplyOn);
+            : clock(data, enemies, capital, false, Set.of(), false);
     final Set<Unit> myPinned = pinsOn ? pins(data, enemies, alliance).held() : Set.of();
     Territory clockTarget = null;
     int myClock = NONE;

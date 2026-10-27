@@ -2562,18 +2562,13 @@ class ProNonCombatMoveAi {
     final int limit = Math.min(strikeIn, ProDanModel.COOKED_HORIZON);
     final List<GamePlayer> enemies = ProUtils.getEnemyPlayers(player);
     final List<GamePlayer> alliance = ProDanModel.alliance(player);
-    final boolean supply = proData.hasPatch(ProAiPatch.DAN_SUPPLY);
-    if (ProDanModel.clock(data, enemies, capital, false, Set.of(), supply) > limit) {
+    // The enemies' clock on my capital is the classic one (see ProDanModel.startTurn)
+    if (ProDanModel.clock(data, enemies, capital, false, Set.of(), false) > limit) {
       return;
     }
     final int pinnedClock =
         ProDanModel.clock(
-            data,
-            enemies,
-            capital,
-            false,
-            ProDanModel.pins(data, alliance, enemies).held(),
-            supply);
+            data, enemies, capital, false, ProDanModel.pins(data, alliance, enemies).held(), false);
     if (pinnedClock <= limit) {
       return;
     }
@@ -2602,7 +2597,7 @@ class ProNonCombatMoveAi {
     }
     for (final Map.Entry<Territory, Set<Unit>> stack : stacks.entrySet()) {
       final Set<Unit> held = ProDanModel.pins(data, alliance, enemies, stack.getValue()).held();
-      final int clockWithout = ProDanModel.clock(data, enemies, capital, false, held, supply);
+      final int clockWithout = ProDanModel.clock(data, enemies, capital, false, held, false);
       if (clockWithout <= limit) {
         proData.isPatchOn(ProAiPatch.DAN_PINS);
         for (final Unit u : stack.getValue()) {
