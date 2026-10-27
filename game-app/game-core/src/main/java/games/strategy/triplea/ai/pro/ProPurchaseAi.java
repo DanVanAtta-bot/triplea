@@ -68,6 +68,8 @@ class ProPurchaseAi {
   private boolean isBid = false;
   // CAPITAL_CLOCK_RESERVE acts when the enemies' clock on my capital is at most this many rounds.
   static final int CLOCK_RESERVE_ROUNDS = 3;
+  // Rounds the clocks look ahead; the strike round is picked within it.
+  static final int CLOCK_HORIZON = 10;
   // STRIKE_TIMED_PURCHASE: least movement of land units bought at each factory this turn.
   private Map<Territory, Integer> strikeMinMovement = Map.of();
   // KILL_PURCHASE: factories whose new units can join next turn's capital attack, by land distance.
@@ -467,7 +469,8 @@ class ProPurchaseAi {
     final int theirClock =
         capital == null || !capital.isOwnedBy(player)
             ? ProClockUtils.NONE
-            : ProClockUtils.timeToKill(data, ProUtils.getEnemyPlayers(player), capital, false, 6);
+            : ProClockUtils.timeToKill(
+                data, ProUtils.getEnemyPlayers(player), capital, false, CLOCK_HORIZON);
     final List<GamePlayer> alliance = new ArrayList<>(ProUtils.getAlliedPlayersInTurnOrder(player));
     if (!alliance.contains(player)) {
       alliance.add(player);
@@ -477,8 +480,10 @@ class ProPurchaseAi {
     final StringBuilder sb = new StringBuilder();
     for (final Territory c : ProUtils.getLiveEnemyCapitals(data, player)) {
       final int economy =
-          ProClockUtils.timeToKill(data, alliance, c, ProClockUtils.Mix.ECONOMY, true, 6);
-      final int fast = ProClockUtils.timeToKill(data, alliance, c, ProClockUtils.Mix.FAST, true, 6);
+          ProClockUtils.timeToKill(
+              data, alliance, c, ProClockUtils.Mix.ECONOMY, true, CLOCK_HORIZON);
+      final int fast =
+          ProClockUtils.timeToKill(data, alliance, c, ProClockUtils.Mix.FAST, true, CLOCK_HORIZON);
       sb.append(' ').append(c.getName()).append('=').append(economy).append('/').append(fast);
       if (Math.min(economy, fast) < myClock) {
         myClock = Math.min(economy, fast);
@@ -509,8 +514,8 @@ class ProPurchaseAi {
             data.getMap()
                 .getDistanceIgnoreEndForCondition(
                     f, target, ProMatches.territoryCanPotentiallyMoveLandUnits(player));
-        if (d > myClock) {
-          minMovement.put(f, (d + myClock - 1) / myClock);
+        if (d > 0) {
+          minMovement.put(f, Math.max(1, (d + myClock - 1) / myClock));
         }
       }
       if (!minMovement.isEmpty()) {
@@ -570,6 +575,11 @@ class ProPurchaseAi {
             + bought
             + " "
             + best.get().getUnitType().getName());
+  }
+
+  private static double attackPowerPerPu(final ProPurchaseOption o) {
+    return (2.0 * o.getHitPoints() + o.getAttack() + (o.isAttackSupport() ? o.getQuantity() : 0))
+        / o.getCost();
   }
 
   private boolean shouldSaveUpForAFleet(
@@ -1293,10 +1303,14 @@ class ProPurchaseAi {
       final Integer minMovement = strikeMinMovement.get(t);
       if (minMovement != null
           && landAttackOptions.stream().anyMatch(o -> o.getMovement() >= minMovement)) {
-        // Only units that reach the strike target by the strike round
+        // Only units that reach the strike target by the strike round, and of those the attack
+        // units with the most combat power per PU (2 x hit points + attack, +1 if it supports)
         landFodderOptions.removeIf(o -> o.getMovement() < minMovement);
         landAttackOptions.removeIf(o -> o.getMovement() < minMovement);
         landDefenseOptions.removeIf(o -> o.getMovement() < minMovement);
+        final double bestPower =
+            landAttackOptions.stream().mapToDouble(ProPurchaseAi::attackPowerPerPu).max().orElse(0);
+        landAttackOptions.removeIf(o -> attackPowerPerPu(o) < bestPower - 1e-9);
         if (landFodderOptions.isEmpty()) {
           landFodderOptions.addAll(landAttackOptions);
         }

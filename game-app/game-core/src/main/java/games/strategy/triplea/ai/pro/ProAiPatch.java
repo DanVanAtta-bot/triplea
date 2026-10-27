@@ -91,10 +91,11 @@ public enum ProAiPatch {
    */
   CAPITAL_CLOCK_RESERVE,
   /**
-   * Purchase picks a strike round T: the kill-strike clock of the player's alliance on the nearest
-   * live enemy capital, if the enemies' clock on the player's capital is longer. At each factory
-   * with a land route to that capital, it buys only land units fast enough to arrive by T (so
-   * infantry while T is far, then only fast units). Stock purchase when there is no such T.
+   * Purchase picks a strike round T: the kill-strike clock (10-round horizon) of the player's
+   * alliance on the nearest live enemy capital, if it beats the enemies' clock on the player's
+   * capital. At each factory with a land route to that capital it buys only land units fast enough
+   * to arrive by T, and of those the attack units with the most combat power per PU: artillery and
+   * infantry while T is far, only fast units once slow ones can't arrive. Stock otherwise.
    */
   STRIKE_TIMED_PURCHASE,
 }
