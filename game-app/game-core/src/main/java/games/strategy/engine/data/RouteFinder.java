@@ -64,6 +64,13 @@ class RouteFinder {
       return Optional.of(new Route(start));
     }
 
+    // The condition and cost are pure per territory within one search, but the search asks about a
+    // territory once per neighbor it's expanded from; ask each territory once.
+    final Map<Territory, Boolean> passable = new HashMap<>();
+    final Predicate<Territory> passableOnce = t -> passable.computeIfAbsent(t, condition::test);
+    final Map<Territory, BigDecimal> costs = new HashMap<>();
+    final Function<Territory, BigDecimal> costOnce =
+        t -> costs.computeIfAbsent(t, territoryCostFunction);
     final Map<Territory, Territory> previous = new HashMap<>();
     previous.put(start, null);
     final Queue<Territory> toVisit = new ArrayDeque<>();
@@ -78,9 +85,8 @@ class RouteFinder {
         continue;
       }
       for (final Territory neighbor :
-          getNeighborsValidatingCanals(currentTerritory, condition, units, player)) {
-        final BigDecimal routeCost =
-            routeCosts.get(currentTerritory).add(territoryCostFunction.apply(neighbor));
+          getNeighborsValidatingCanals(currentTerritory, passableOnce, units, player)) {
+        final BigDecimal routeCost = routeCosts.get(currentTerritory).add(costOnce.apply(neighbor));
         if (!previous.containsKey(neighbor) || routeCost.compareTo(routeCosts.get(neighbor)) < 0) {
           previous.put(neighbor, currentTerritory);
           routeCosts.put(neighbor, routeCost);
