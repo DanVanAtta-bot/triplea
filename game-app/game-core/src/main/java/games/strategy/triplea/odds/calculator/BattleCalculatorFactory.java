@@ -16,4 +16,9 @@ public final class BattleCalculatorFactory {
         ? new BoundedContextBattleCalculator()
         : new ConcurrentBattleCalculator();
   }
+
+  /** The engine-free calculator, regardless of the client setting. */
+  public static IBattleCalculator newBoundedBattleCalculator() {
+    return new BoundedContextBattleCalculator();
+  }
 }

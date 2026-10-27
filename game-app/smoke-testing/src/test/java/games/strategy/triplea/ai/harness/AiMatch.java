@@ -43,17 +43,18 @@ import javax.annotation.Nullable;
  *
  * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> [--baseline-patches
  * <P1,P2|none>] --rounds <cap> [--calc bounded|concurrent] [--props "Name=value,Name2=value"]
- * [--bid <file.bid.json>] [--swap] [--out <dir>] [--odds-runs <n>] [--flag-combat <tuv>]
- * [--flag-odds <0..1>] [--scripts <player:round:file.json,...>]}. {@code --scripts} plays that
- * player's turn of that round from a kata script (see {@link KataScript}; phases the script leaves
- * out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a second game
- * with the patched set given to the other alliance (two-alliance maps only). {@code --bid} applies
- * a fixed bid before round 1, see {@link FixedBid}. {@code --props} overrides game options by their
- * exact XML name; Tech Development is always forced off. Every game writes {@code <out>/<game id>/}
- * with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds; see {@link
- * GameRecorder}. {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early, won by the
- * side that has been decisively ahead for that many round ends (see {@link DecisiveRule}); it
- * prints a DECISIVE line before RESULT, and RESULT shows the game as that side's win.
+ * [--bid <file.bid.json>] [--swap] [--out <dir>] [--odds-runs <n>] [--recorder-odds
+ * concurrent|bounded|off] [--flag-combat <tuv>] [--flag-odds <0..1>] [--scripts
+ * <player:round:file.json,...>]}. {@code --scripts} plays that player's turn of that round from a
+ * kata script (see {@link KataScript}; phases the script leaves out, and every other turn, are the
+ * player's side's Hard AI). {@code --swap} plays a second game with the patched set given to the
+ * other alliance (two-alliance maps only). {@code --bid} applies a fixed bid before round 1, see
+ * {@link FixedBid}. {@code --props} overrides game options by their exact XML name; Tech
+ * Development is always forced off. Every game writes {@code <out>/<game id>/} with {@code
+ * game.json}, {@code records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
+ * {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early, won by the side that has
+ * been decisively ahead for that many round ends (see {@link DecisiveRule}); it prints a DECISIVE
+ * line before RESULT, and RESULT shows the game as that side's win.
  *
  * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
  * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
@@ -90,12 +91,12 @@ public final class AiMatch {
         new GameRecorder.Options(
             Integer.parseInt(opts.getOrDefault("odds-runs", "500")),
             Integer.parseInt(opts.getOrDefault("flag-combat", "50")),
-            Double.parseDouble(opts.getOrDefault("flag-odds", "0.6")));
+            Double.parseDouble(opts.getOrDefault("flag-odds", "0.6")),
+            opts.getOrDefault("recorder-odds", "concurrent"));
     final Map<String, Object> runConfig = new LinkedHashMap<>();
     runConfig.put("map", map);
     runConfig.put("round_cap", roundCap);
     runConfig.put("calc", calc);
-    runConfig.put("harness_odds_calc", "concurrent");
     runConfig.put("patches", patches.stream().map(Enum::name).sorted().toList());
     runConfig.put("baseline_patches", baselinePatches.stream().map(Enum::name).sorted().toList());
     runConfig.put("tech_development", false);
@@ -666,6 +667,7 @@ public final class AiMatch {
           Map.entry("swap", ""),
           Map.entry("out", "<dir>"),
           Map.entry("odds-runs", "<n>"),
+          Map.entry("recorder-odds", "concurrent|bounded|off"),
           Map.entry("flag-combat", "<tuv>"),
           Map.entry("flag-odds", "<0..1>"),
           Map.entry("start", "<export.jsonl>@<round>@<player>"),

@@ -8,7 +8,7 @@ import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.delegate.TerritoryEffectHelper;
 import games.strategy.triplea.odds.calculator.AggregateResults;
-import games.strategy.triplea.odds.calculator.ConcurrentBattleCalculator;
+import games.strategy.triplea.odds.calculator.IBattleCalculator;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -49,7 +49,8 @@ final class CapitalThreats {
   private record Cached(Set<UUID> attackers, Set<UUID> defenders, Map<String, Object> odds) {}
 
   private final GameData data;
-  private final ConcurrentBattleCalculator oddsCalc;
+  // Null: harness odds are off, so threats carry no odds.
+  @Nullable private final IBattleCalculator oddsCalc;
   private final int oddsRuns;
   private final Function<GamePlayer, String> sideOf;
   private final Function<Collection<Unit>, Integer> tuvOf;
@@ -62,7 +63,7 @@ final class CapitalThreats {
 
   CapitalThreats(
       final GameData data,
-      final ConcurrentBattleCalculator oddsCalc,
+      @Nullable final IBattleCalculator oddsCalc,
       final int oddsRuns,
       final Function<GamePlayer, String> sideOf,
       final Function<Collection<Unit>, Integer> tuvOf,
@@ -113,7 +114,7 @@ final class CapitalThreats {
         threat.put("attacker_tuv", tuvOf.apply(attackers));
         threat.put("has_land_attackers", hasLand);
         final Map<String, Object> odds;
-        if (!hasLand) {
+        if (!hasLand || oddsCalc == null) {
           odds = null;
         } else if (defenders.isEmpty()) {
           odds = Map.of("win", 1.0, "exp_tuv_swing", 0.0, "runs", 0);
@@ -156,7 +157,9 @@ final class CapitalThreats {
       r.put("defenders", countByType(allDefenders));
       r.put("defender_tuv", tuvOf.apply(allDefenders));
       final Map<String, Object> top = threats.isEmpty() ? null : threats.get(0);
-      r.put("max_win", top == null || top.get("odds") == null ? 0.0 : winOf(top));
+      r.put(
+          "max_win",
+          oddsCalc == null ? null : top == null || top.get("odds") == null ? 0.0 : winOf(top));
       r.put("max_attacker", top == null ? null : top.get("attacker"));
       r.put("threats", threats);
       records.add(r);

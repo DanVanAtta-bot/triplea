@@ -26,7 +26,9 @@ import games.strategy.triplea.delegate.battle.BattleDelegate;
 import games.strategy.triplea.delegate.battle.BattleTracker;
 import games.strategy.triplea.delegate.battle.IBattle;
 import games.strategy.triplea.odds.calculator.AggregateResults;
+import games.strategy.triplea.odds.calculator.BattleCalculatorFactory;
 import games.strategy.triplea.odds.calculator.ConcurrentBattleCalculator;
+import games.strategy.triplea.odds.calculator.IBattleCalculator;
 import games.strategy.triplea.util.TuvCostsCalculator;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -63,7 +65,28 @@ import javax.annotation.Nullable;
  */
 final class GameRecorder {
 
-  record Options(int oddsRuns, int flagCombat, double flagOdds) {}
+  /**
+   * {@code oddsCalc} picks the calculator behind the harness's own odds ({@code odds_harness} on
+   * battles, {@code odds} on capital threats): {@code concurrent} (the engine's
+   * ConcurrentBattleCalculator, the default), {@code bounded} (the AI's engine-free calculator, ~4x
+   * cheaper per run) or {@code off} (no harness odds: those fields are null and the risky-battle
+   * flag never fires). The harness calculator runs on its own dice and, for concurrent, its own
+   * copy of the game, so the choice never changes the game being played.
+   */
+  record Options(int oddsRuns, int flagCombat, double flagOdds, String oddsCalc) {
+    static final List<String> ODDS_CALCS = List.of("concurrent", "bounded", "off");
+
+    Options {
+      if (!ODDS_CALCS.contains(oddsCalc)) {
+        throw new IllegalArgumentException(
+            "odds calc must be one of " + ODDS_CALCS + ": " + oddsCalc);
+      }
+    }
+
+    boolean oddsOff() {
+      return oddsCalc.equals("off");
+    }
+  }
 
   private record UnitRec(String type, GamePlayer owner, String where, int cost, boolean infra) {}
 
@@ -145,7 +168,7 @@ final class GameRecorder {
   private final BufferedWriter out;
   private final Map<String, Object> config;
 
-  private final ConcurrentBattleCalculator oddsCalc = new ConcurrentBattleCalculator();
+  private final IBattleCalculator oddsCalc;
   private Snapshot prev;
   private int round;
   private Map<String, SideAcc> acc = new LinkedHashMap<>();
@@ -190,6 +213,10 @@ final class GameRecorder {
     this.data = game.getData();
     this.gameId = gameId;
     this.options = options;
+    this.oddsCalc =
+        options.oddsCalc().equals("bounded")
+            ? BattleCalculatorFactory.newBoundedBattleCalculator()
+            : new ConcurrentBattleCalculator();
     this.decisionLog = decisionLog;
     this.variantBySide = variantBySide;
     this.dir = outRoot.resolve(gameId);
@@ -215,7 +242,8 @@ final class GameRecorder {
     this.config.put("variant_by_side", variantBySide);
     this.turnOrder = turnOrder(data);
     this.config.put("turn_order", turnOrder.stream().map(GamePlayer::getName).toList());
-    this.config.put("odds_runs", options.oddsRuns());
+    this.config.put("odds_runs", options.oddsOff() ? 0 : options.oddsRuns());
+    this.config.put("harness_odds_calc", options.oddsCalc());
     this.config.put(
         "flag_rules",
         Map.of(
@@ -234,7 +262,13 @@ final class GameRecorder {
     round = data.getSequence().getRound();
     emitRoundRecords(0, false);
     capitalThreats =
-        new CapitalThreats(data, oddsCalc, options.oddsRuns(), sideOf::get, this::tuvOf, turnOrder);
+        new CapitalThreats(
+            data,
+            options.oddsOff() ? null : oddsCalc,
+            options.oddsRuns(),
+            sideOf::get,
+            this::tuvOf,
+            turnOrder);
   }
 
   Path dir() {
@@ -680,7 +714,7 @@ final class GameRecorder {
     if (battles.isEmpty()) {
       return List.of();
     }
-    if (battles.stream().anyMatch(GameRecorder::oddsApplicable)) {
+    if (!options.oddsOff() && battles.stream().anyMatch(GameRecorder::oddsApplicable)) {
       // The calculator works on its own copy of the game; refresh it to the current board.
       oddsCalc.setGameData(data).join();
     }
@@ -752,7 +786,7 @@ final class GameRecorder {
             defending.stream().map(Unit::getId).toList(),
             capitalOf != null || vc > 0,
             r);
-    if (oddsApplicable(battle) && defender != null) {
+    if (!options.oddsOff() && oddsApplicable(battle) && defender != null) {
       oddsCalc.setAmphibious(battle.isAmphibious());
       final AggregateResults results =
           oddsCalc.calculate(
