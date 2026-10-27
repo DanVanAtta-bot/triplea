@@ -45,8 +45,12 @@ public class ProSupplyUtils {
     }
   }
 
-  /** A factory feeding the target: turns for its slowest unit to arrive, units per turn. */
-  record Feed(int time, double unitsPerTurn) {}
+  /**
+   * A factory feeding the target: turns for its slowest unit to arrive, units per turn it produces,
+   * and, for one with no land route, the units per turn its owner's transports can land (0 if it
+   * marches). Factories that ship share the same transports.
+   */
+  record Feed(int time, double unitsPerTurn, double shuttleUnits) {}
 
   /**
    * Strength {@code side} can have at {@code x} by each of its next {@code maxRounds} turns.
@@ -130,11 +134,16 @@ public class ProSupplyUtils {
       feeds.sort(Comparator.comparingInt(Feed::time));
       final double income = ProUtils.getPlayerProduction(p, data);
       final double bank = p.getResources().getQuantity(pus);
+      final double shuttlePool = feeds.stream().mapToDouble(Feed::shuttleUnits).max().orElse(0);
       double spent = 0;
+      double shuttleLeft = shuttlePool;
       for (final Feed feed : feeds) {
-        final double pusHere = Math.min(income - spent, feed.unitsPerTurn() * puPerUnit);
+        final double pusHere = Math.min(income - spent, unitsFor(feed, shuttleLeft) * puPerUnit);
         if (pusHere <= 0) {
-          break;
+          continue;
+        }
+        if (feed.shuttleUnits() > 0) {
+          shuttleLeft -= pusHere / puPerUnit;
         }
         spent += pusHere;
         steady += pusHere * perPu;
@@ -142,10 +151,14 @@ public class ProSupplyUtils {
       }
       for (int i = buyNow ? 0 : 1; i <= maxRounds; i++) {
         double budget = i == 0 ? bank : income;
+        double left = shuttlePool;
         for (final Feed feed : feeds) {
-          final double pusHere = Math.min(budget, feed.unitsPerTurn() * puPerUnit);
+          final double pusHere = Math.min(budget, unitsFor(feed, left) * puPerUnit);
           if (pusHere <= 0) {
-            break;
+            continue;
+          }
+          if (feed.shuttleUnits() > 0) {
+            left -= pusHere / puPerUnit;
           }
           budget -= pusHere;
           if (i + feed.time() <= maxRounds) {
@@ -161,6 +174,13 @@ public class ProSupplyUtils {
       cumulative[t] = sum;
     }
     return new Arrival(cumulative, steady, horizon);
+  }
+
+  /** Units per turn a feed can still deliver, its shipping capped by the transports left. */
+  private static double unitsFor(final Feed feed, final double shuttleLeft) {
+    return feed.shuttleUnits() > 0
+        ? Math.max(0, Math.min(feed.unitsPerTurn(), shuttleLeft))
+        : feed.unitsPerTurn();
   }
 
   /**
@@ -243,14 +263,15 @@ public class ProSupplyUtils {
     if (d != null) {
       final int time =
           d == 0 ? (defending ? 0 : 1) : Math.max(1, ProClockUtils.ceilDiv(d, Math.max(1, speed)));
-      return new Feed(time, production);
+      return new Feed(time, production, 0);
     }
     final Shuttle s = shuttle(data, p, f, land);
     if (s == null) {
       return null;
     }
-    final double units = Math.min(production, s.unitsPerTurn());
-    return units <= 0 ? null : new Feed(s.sailTurns() + s.march(), units);
+    return s.unitsPerTurn() <= 0
+        ? null
+        : new Feed(s.sailTurns() + s.march(), production, s.unitsPerTurn());
   }
 
   /** A transport shuttle: turns to sail, then land steps to march, and units it lands per turn. */

@@ -74,4 +74,18 @@ class ProSupplyUtilsTest {
     assertThat(withFactory.at(3)).isGreaterThan(base.at(3));
     assertThat(withFactory.horizon()).isLessThanOrEqualTo(base.horizon());
   }
+
+  @Test
+  void islandFactoriesShareTheirTransports() {
+    final GamePlayer british = player("British");
+    final Territory germany = territory("Germany");
+    final ProSupplyUtils.Arrival base =
+        ProSupplyUtils.arrival(data, List.of(british), germany, true, true, 6, Set.of(), null);
+    final ProSupplyUtils.Arrival withCanada =
+        ProSupplyUtils.arrival(
+            data, List.of(british), germany, true, true, 6, Set.of(), territory("Eastern Canada"));
+
+    // A second island factory ships on the same transports, so nothing more arrives
+    assertThat(withCanada.at(6)).isLessThanOrEqualTo(base.at(6));
+  }
 }
