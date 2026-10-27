@@ -81,6 +81,7 @@ public final class Kata {
     ClientSetting.useBoundedContextBattleCalc.setValue(calc.equals("bounded"));
     switch (args[0]) {
       case "run" -> run(opts);
+      case "batch" -> batch(opts);
       case "save" -> save(opts);
       case "dump" -> dump(opts);
       default -> throw new IllegalArgumentException("Unknown subcommand: " + args[0]);
@@ -90,6 +91,25 @@ public final class Kata {
   }
 
   // ---------------------------------------------------------------- run
+
+  /**
+   * {@code batch --file F}: one {@code run} per non-blank line of F (its options, space-separated),
+   * all in this JVM, each preceded by a {@code === TASK <line>} marker.
+   */
+  private static void batch(final Map<String, List<String>> opts) throws IOException {
+    for (final String line : Files.readAllLines(Path.of(required(opts, "file")))) {
+      if (line.isBlank()) {
+        continue;
+      }
+      System.out.println("=== TASK " + line);
+      try {
+        run(parseArgs(line.trim().split("\\s+")));
+      } catch (final RuntimeException e) {
+        System.out.println("=== TASK FAILED " + e);
+      }
+      System.out.flush();
+    }
+  }
 
   private record Variant(String label, Set<ProAiPatch> patches, @Nullable KataScript script) {}
 
