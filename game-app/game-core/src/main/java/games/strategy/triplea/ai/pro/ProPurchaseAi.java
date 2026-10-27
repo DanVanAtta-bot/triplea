@@ -82,6 +82,10 @@ class ProPurchaseAi {
   static final int PAD_FODDER_PERCENT = 85;
   // DAN_FACTORY: rounds over which a new factory's extra arrival at the target is counted.
   static final int FACTORY_HORIZON = 6;
+  // DAN_FACTORY: the gain must be this many times the factory's cost (the arrival model is rough),
+  // in a territory of at least this production with no factory of mine next to it.
+  static final double FACTORY_GAIN_RATIO = 2;
+  static final int FACTORY_MIN_PRODUCTION = 3;
 
   ProPurchaseAi(final AbstractProAi ai) {
     this.calc = ai.getCalc();
@@ -759,7 +763,13 @@ class ProPurchaseAi {
         CollectionUtils.getMatches(
             data.getMap().getTerritories(),
             ProMatches.territoryHasNoInfraFactoryAndIsNotConqueredOwnedLand(player))) {
-      if (TerritoryAttachment.getProduction(c) < 2 || factoryPurchaseTerritories.containsKey(c)) {
+      if (TerritoryAttachment.getProduction(c) < FACTORY_MIN_PRODUCTION
+          || factoryPurchaseTerritories.containsKey(c)
+          || data.getMap().getNeighbors(c).stream()
+              .anyMatch(
+                  n ->
+                      n.isOwnedBy(player)
+                          && ProMatches.territoryHasInfraFactoryAndIsLand().test(n))) {
         continue;
       }
       final List<ProPurchaseOption> options =
@@ -787,7 +797,8 @@ class ProPurchaseAi {
       final ProSupplyUtils.Arrival with =
           ProSupplyUtils.arrival(data, me, target, true, true, FACTORY_HORIZON, Set.of(), c);
       final double gain = (with.at(FACTORY_HORIZON) - base.at(FACTORY_HORIZON)) / perPu;
-      if (gain - option.getCost() > bestGain
+      if (gain >= FACTORY_GAIN_RATIO * option.getCost()
+          && gain - option.getCost() > bestGain
           && ProSupplyUtils.heldTurns(data, alliance, enemies, c, c) >= 2) {
         best = c;
         bestOption = option;
