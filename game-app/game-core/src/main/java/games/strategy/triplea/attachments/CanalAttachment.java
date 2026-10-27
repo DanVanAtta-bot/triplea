@@ -4,6 +4,7 @@ import games.strategy.engine.data.Attachable;
 import games.strategy.engine.data.DefaultAttachment;
 import games.strategy.engine.data.GameData;
 import games.strategy.engine.data.GameState;
+import games.strategy.engine.data.IAttachment;
 import games.strategy.engine.data.MutableProperty;
 import games.strategy.engine.data.Route;
 import games.strategy.engine.data.Territory;
@@ -42,6 +43,19 @@ public class CanalAttachment extends DefaultAttachment {
 
   private static boolean hasCanal(final Territory t, final String canalName) {
     return !get(t, canalAttachment -> canalAttachment.getCanalName().equals(canalName)).isEmpty();
+  }
+
+  /**
+   * Whether {@code t} carries any canal attachment. A cheap pre-check (no stream, no allocation):
+   * route finding asks about canals for every neighbor it expands, and most territories have none.
+   */
+  public static boolean hasAnyCanal(final Territory t) {
+    for (final IAttachment attachment : t.getAttachments().values()) {
+      if (attachment.getName().startsWith(Constants.CANAL_ATTACHMENT_PREFIX)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public static List<CanalAttachment> get(final Territory t, final Route onRoute) {

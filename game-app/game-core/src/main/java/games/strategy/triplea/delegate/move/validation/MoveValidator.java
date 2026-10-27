@@ -308,6 +308,16 @@ public class MoveValidator {
       @Nullable final Collection<Unit> units,
       final Map<Unit, Collection<Unit>> airTransportDependents,
       final GamePlayer player) {
+    // A canal is on the route only if two consecutive territories carry it; most routes touch none.
+    int withCanal = 0;
+    for (final Territory t : route.getAllTerritories()) {
+      if (CanalAttachment.hasAnyCanal(t)) {
+        withCanal++;
+      }
+    }
+    if (withCanal < 2) {
+      return null;
+    }
     Map<Territory, Collection<CanalAttachment>> territoryCanals = new HashMap<>();
     int numCanals = 0;
     for (Territory t : route.getAllTerritories()) {
@@ -380,6 +390,10 @@ public class MoveValidator {
       final Territory end,
       final Collection<Unit> units,
       final GamePlayer player) {
+    // A canal is on the step only if both ends carry it; most territories carry none.
+    if (!CanalAttachment.hasAnyCanal(start) || !CanalAttachment.hasAnyCanal(end)) {
+      return true;
+    }
     boolean canPass = true;
     final Route route = new Route(start, end);
     for (final CanalAttachment canalAttachment : CanalAttachment.get(start, route)) {
