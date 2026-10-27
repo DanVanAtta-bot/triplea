@@ -4,6 +4,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import games.strategy.engine.random.TestSeeds;
 import games.strategy.triplea.Constants;
 import games.strategy.triplea.Properties;
 import games.strategy.triplea.attachments.TerritoryAttachment;
@@ -119,7 +120,7 @@ public class Unit extends GameDataComponent implements DynamicallyModifiable {
   public Unit(final UnitType type, @Nullable final GamePlayer owner, final GameData data) {
     super(data);
     this.type = checkNotNull(type);
-    this.id = UUID.randomUUID();
+    this.id = TestSeeds.nextUnitId();
 
     setOwner(owner);
   }

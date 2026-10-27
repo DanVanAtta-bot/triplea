@@ -10,6 +10,8 @@ import games.strategy.engine.data.properties.IEditableProperty;
 import games.strategy.engine.framework.ServerGame;
 import games.strategy.engine.framework.startup.ui.PlayerTypes;
 import games.strategy.engine.player.Player;
+import games.strategy.engine.random.PlainRandomSource;
+import games.strategy.engine.random.TestSeeds;
 import games.strategy.triplea.Constants;
 import games.strategy.triplea.ai.kata.KataAi;
 import games.strategy.triplea.ai.kata.KataScript;
@@ -19,6 +21,7 @@ import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.EndRoundDelegate;
 import games.strategy.triplea.settings.ClientSetting;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -30,6 +33,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -45,19 +49,21 @@ import javax.annotation.Nullable;
  * <P1,P2|none>] --rounds <cap> [--calc bounded|concurrent] [--props "Name=value,Name2=value"]
  * [--bid <file.bid.json>] [--swap] [--repeat <n>] [--out <dir>] [--odds-runs <n>] [--recorder-odds
  * concurrent|bounded|off] [--flag-combat <tuv>] [--flag-odds <0..1>] [--scripts
- * <player:round:file.json,...>]}. {@code --scripts} plays that player's turn of that round from a
- * kata script (see {@link KataScript}; phases the script leaves out, and every other turn, are the
- * player's side's Hard AI). {@code --swap} plays a second game with the patched set given to the
- * other alliance (two-alliance maps only). {@code --bid} applies a fixed bid before round 1, see
- * {@link FixedBid}. {@code --props} overrides game options by their exact XML name; Tech
- * Development is always forced off. Every game writes {@code <out>/<game id>/} with {@code
- * game.json}, {@code records.jsonl} and the saves of flagged rounds; see {@link GameRecorder}.
- * {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early, won by the side that has
- * been decisively ahead for that many round ends (see {@link DecisiveRule}); it prints a DECISIVE
- * line before RESULT, and RESULT shows the game as that side's win. {@code --repeat <n>} plays the
- * whole set (one game, or two with {@code --swap}) n times in this JVM, so later games run on
- * JIT-compiled code; each game prints its own RESULT, then a GAME_CPU line with the process CPU
- * seconds it used.
+ * <player:round:file.json,...>] [--seed <long>]}. {@code --seed} fixes the game dice, the AI's
+ * calculator dice and its random purchase pick, and writes {@code history.txt} (every move and
+ * roll) next to the records, so a build change can be checked move-by-move. {@code --scripts} plays
+ * that player's turn of that round from a kata script (see {@link KataScript}; phases the script
+ * leaves out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a second
+ * game with the patched set given to the other alliance (two-alliance maps only). {@code --bid}
+ * applies a fixed bid before round 1, see {@link FixedBid}. {@code --props} overrides game options
+ * by their exact XML name; Tech Development is always forced off. Every game writes {@code
+ * <out>/<game id>/} with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds;
+ * see {@link GameRecorder}. {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early,
+ * won by the side that has been decisively ahead for that many round ends (see {@link
+ * DecisiveRule}); it prints a DECISIVE line before RESULT, and RESULT shows the game as that side's
+ * win. {@code --repeat <n>} plays the whole set (one game, or two with {@code --swap}) n times in
+ * this JVM, so later games run on JIT-compiled code; each game prints its own RESULT, then a
+ * GAME_CPU line with the process CPU seconds it used.
  *
  * <p>Human starts: {@code --start <export.jsonl>@<round>@<player>}, or {@code --start-list <file>
  * --start-key {game_dir}} (one spec per line, picked per runner game, see {@link HumanStart#pick}),
@@ -104,8 +110,9 @@ public final class AiMatch {
     runConfig.put("baseline_patches", baselinePatches.stream().map(Enum::name).sorted().toList());
     runConfig.put("tech_development", false);
     runConfig.put("props", props);
-    runConfig.put("dice_seed", null);
-    runConfig.put("ai_seed", null);
+    final Long seed = opts.containsKey("seed") ? Long.parseLong(opts.get("seed")) : null;
+    runConfig.put("dice_seed", seed);
+    runConfig.put("ai_seed", seed);
     runConfig.put("engine_commit", git("rev-parse", "HEAD"));
     runConfig.put("engine_dirty", !git("status", "--porcelain", "--untracked-files=no").isEmpty());
     runConfig.put("java", System.getProperty("java.version"));
@@ -121,6 +128,9 @@ public final class AiMatch {
     System.out.println("DECISIVE_RULE " + (decisive == null ? "off" : decisive));
     final int repeat = Integer.parseInt(opts.getOrDefault("repeat", "1"));
     if (opts.containsKey("start") || opts.containsKey("start-list")) {
+      if (seed != null) {
+        throw new IllegalArgumentException("--seed doesn't apply to a human start");
+      }
       if (bid != null || opts.containsKey("swap") || repeat != 1) {
         throw new IllegalArgumentException(
             "--bid, --swap and --repeat don't apply to a human start");
@@ -165,7 +175,8 @@ public final class AiMatch {
             runConfig,
             props,
             scripts,
-            decisive);
+            decisive,
+            seed);
         System.out.printf("GAME_CPU seconds=%.1f%n", (os.getProcessCpuTime() - cpu0) / 1e9);
       }
     }
@@ -185,7 +196,11 @@ public final class AiMatch {
       final Map<String, Object> runConfig,
       final Map<String, String> props,
       final Map<String, Map<Integer, KataScript>> scripts,
-      @Nullable final DecisiveRule.Spec decisive) {
+      @Nullable final DecisiveRule.Spec decisive,
+      @Nullable final Long seed) {
+    if (seed != null) {
+      seedAiRandomness(seed);
+    }
     final List<ProAi> ais = new ArrayList<>();
     final Map<String, KataAi> scripted = new TreeMap<>();
     final DecisionLog decisionLog = new DecisionLog();
@@ -210,6 +225,9 @@ public final class AiMatch {
             },
             player -> allianceOf(player).equals(patchedAlliance) ? patched : baseline);
     game.setStopGameOnDelegateExecutionStop(true);
+    if (seed != null) {
+      game.setRandomSource(new PlainRandomSource(seed));
+    }
     final GameData data = game.getData();
     final Map<String, String> variantBySide = new LinkedHashMap<>();
     final Map<String, List<String>> patchesBySide = new LinkedHashMap<>();
@@ -292,6 +310,9 @@ public final class AiMatch {
         (name, actions) -> actions.forEach(a -> System.out.println("SCRIPT " + name + " " + a)));
     System.out.println("SCRIPT_FAILURES " + scriptFailures);
     recorder.finish(result);
+    if (seed != null) {
+      HistoryDump.write(data, recorder.dir().resolve("history.txt"));
+    }
     if (decided != null) {
       decided.print();
     }
@@ -314,6 +335,27 @@ public final class AiMatch {
       // Resets ProAi's static battle calculator so a following game in this JVM starts clean.
       game.stopGame();
     }
+  }
+
+  /**
+   * Makes the AI side of a game reproducible: seeds the dice of the AI's bounded calculator and of
+   * its turn-sim battles ({@link TestSeeds}), and the JDK generator behind {@link Math#random()}
+   * (ProAI's random purchase pick). The latter needs {@code --add-opens
+   * java.base/java.lang=ALL-UNNAMED}. Game dice are seeded separately on the game.
+   */
+  private static void seedAiRandomness(final long seed) {
+    TestSeeds.seed(seed);
+    Math.random(); // initializes the holder
+    try {
+      final Class<?> holder = Class.forName("java.lang.Math$RandomNumberGeneratorHolder");
+      final Field f = holder.getDeclaredField("randomNumberGenerator");
+      f.setAccessible(true);
+      ((Random) f.get(null)).setSeed(seed);
+    } catch (final ReflectiveOperationException | RuntimeException e) {
+      throw new IllegalStateException(
+          "--seed needs the JVM flag --add-opens java.base/java.lang=ALL-UNNAMED", e);
+    }
+    System.out.println("SEED " + seed);
   }
 
   /**
@@ -688,7 +730,8 @@ public final class AiMatch {
           Map.entry("start-key", "<key>"),
           Map.entry("play-rounds", "<n>"),
           Map.entry("scripts", "<player:round:file,...>"),
-          Map.entry("decisive", "<rounds:tuvLead%:productionLead%>"));
+          Map.entry("decisive", "<rounds:tuvLead%:productionLead%>"),
+          Map.entry("seed", "<long>"));
 
   private static String usage() {
     return "Usage: AiMatch "

@@ -7,6 +7,7 @@ import games.strategy.engine.data.TerritoryEffect;
 import games.strategy.engine.data.Unit;
 import games.strategy.engine.random.IRandomSource;
 import games.strategy.engine.random.PlainRandomSource;
+import games.strategy.engine.random.TestSeeds;
 import games.strategy.triplea.odds.calculator.adapter.BoundedContextAggregateResults;
 import games.strategy.triplea.odds.calculator.adapter.EngineRandomSource;
 import games.strategy.triplea.odds.calculator.adapter.GameDataBattleAdapter;
@@ -22,6 +23,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import javax.annotation.Nullable;
 import lombok.Setter;
 
@@ -52,6 +54,16 @@ class BoundedContextBattleCalculator implements IBattleCalculator {
   // workers, so it must be thread-safe when runCount splits (PlainRandomSource is).
   @Setter private volatile IRandomSource randomSource = new PlainRandomSource();
   private volatile boolean cancelled = false;
+  // Whether this is the AI's calculator, which follows TestSeeds.CALC when a test seeds it.
+  private final boolean followsTestSeeds;
+
+  BoundedContextBattleCalculator() {
+    this(false);
+  }
+
+  BoundedContextBattleCalculator(final boolean followsTestSeeds) {
+    this.followsTestSeeds = followsTestSeeds;
+  }
 
   @Override
   public CompletableFuture<Boolean> setGameData(@Nullable final GameData data) {
@@ -123,10 +135,33 @@ class BoundedContextBattleCalculator implements IBattleCalculator {
     for (int i = 0; i < workers; i++) {
       shares.add(distributor.nextRunCount());
     }
+    if (followsTestSeeds && TestSeeds.isSeeded()) {
+      return simulateSeeded(scenario, shares);
+    }
     final List<BattleResult> merged =
         shares.parallelStream()
             .filter(share -> share > 0)
-            .flatMap(share -> simulateShare(scenario, share).stream())
+            .flatMap(share -> simulateShare(scenario, share, randomSource).stream())
+            .collect(Collectors.toList());
+    return new SimulationResults(merged);
+  }
+
+  /**
+   * Like the unseeded path, but each share gets its own dice source, drawn here on the calling
+   * thread, so the results don't depend on how the workers interleave.
+   */
+  private SimulationResults simulateSeeded(
+      final BattleScenario scenario, final List<Integer> shares) {
+    final List<IRandomSource> sources = new ArrayList<>(shares.size());
+    for (int i = 0; i < shares.size(); i++) {
+      sources.add(TestSeeds.next(TestSeeds.CALC));
+    }
+    final List<BattleResult> merged =
+        IntStream.range(0, shares.size())
+            .parallel()
+            .filter(i -> shares.get(i) > 0)
+            .mapToObj(i -> simulateShare(scenario, shares.get(i), sources.get(i)))
+            .flatMap(List::stream)
             .collect(Collectors.toList());
     return new SimulationResults(merged);
   }
@@ -134,10 +169,11 @@ class BoundedContextBattleCalculator implements IBattleCalculator {
   /**
    * Runs one worker's share in cancel-polled sub-batches over a private simulator and dice source.
    */
-  private List<BattleResult> simulateShare(final BattleScenario scenario, final int share) {
+  private List<BattleResult> simulateShare(
+      final BattleScenario scenario, final int share, final IRandomSource dice) {
     final ReferenceBattleSimulator simulator =
         new ReferenceBattleSimulator(new VectorizedHitRoller());
-    final EngineRandomSource rng = new EngineRandomSource(randomSource);
+    final EngineRandomSource rng = new EngineRandomSource(dice);
     final List<BattleResult> results = new ArrayList<>(share);
     int remaining = share;
     while (remaining > 0 && !cancelled) {

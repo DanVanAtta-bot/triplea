@@ -9,8 +9,10 @@ import games.strategy.engine.display.IDisplay;
 import games.strategy.engine.history.DelegateHistoryWriter;
 import games.strategy.engine.history.IDelegateHistoryWriter;
 import games.strategy.engine.player.Player;
+import games.strategy.engine.random.IRandomSource;
 import games.strategy.engine.random.IRandomStats.DiceType;
 import games.strategy.engine.random.PlainRandomSource;
+import games.strategy.engine.random.TestSeeds;
 import games.strategy.triplea.ResourceLoader;
 import games.strategy.triplea.ai.pro.AbstractProAi;
 import games.strategy.triplea.ui.display.HeadlessDisplay;
@@ -24,7 +26,8 @@ import org.triplea.sound.ISound;
  * changes generated during the simulation.
  */
 public class ProDummyDelegateBridge implements IDelegateBridge {
-  private final PlainRandomSource randomSource = new PlainRandomSource();
+  private final IRandomSource randomSource =
+      Optional.ofNullable(TestSeeds.next(TestSeeds.PRO_SIM)).orElseGet(PlainRandomSource::new);
   private final IDisplay display = new HeadlessDisplay();
   private final ISound soundChannel = new HeadlessSoundChannel();
   private final GamePlayer player;

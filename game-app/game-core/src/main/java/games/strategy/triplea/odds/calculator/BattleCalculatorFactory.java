@@ -13,7 +13,7 @@ public final class BattleCalculatorFactory {
 
   public static IBattleCalculator newBattleCalculator() {
     return ClientSetting.useBoundedContextBattleCalc.getSetting()
-        ? new BoundedContextBattleCalculator()
+        ? new BoundedContextBattleCalculator(true)
         : new ConcurrentBattleCalculator();
   }
 
