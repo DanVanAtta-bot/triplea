@@ -799,7 +799,7 @@ class ProPurchaseAi {
       final double gain = (with.at(FACTORY_HORIZON) - base.at(FACTORY_HORIZON)) / perPu;
       if (gain >= FACTORY_GAIN_RATIO * option.getCost()
           && gain - option.getCost() > bestGain
-          && ProSupplyUtils.heldTurns(data, alliance, enemies, c, c) >= 2) {
+          && ProSupplyUtils.heldTurns(data, alliance, enemies, c, null) >= 2) {
         best = c;
         bestOption = option;
         bestGain = gain - option.getCost();
