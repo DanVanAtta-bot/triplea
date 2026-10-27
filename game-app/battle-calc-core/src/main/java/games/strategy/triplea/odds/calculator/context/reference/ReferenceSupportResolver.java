@@ -6,14 +6,17 @@ import games.strategy.triplea.odds.calculator.context.model.Force;
 import games.strategy.triplea.odds.calculator.context.model.Key;
 import games.strategy.triplea.odds.calculator.context.model.Lifecycle;
 import games.strategy.triplea.odds.calculator.context.model.Side;
+import games.strategy.triplea.odds.calculator.context.model.SupportCategory;
 import games.strategy.triplea.odds.calculator.context.model.SupportRule;
 import games.strategy.triplea.odds.calculator.context.seam.SupportResolver;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Reference {@link SupportResolver}: allocates a firing group's support and returns the evaluated
@@ -31,6 +34,10 @@ import java.util.Map;
  * its reversed {@code SupportRuleSort}. A recipient's total delta is the sum of both.
  */
 public class ReferenceSupportResolver implements SupportResolver {
+
+  // split() cache: the rule list it was built for, and its four (side, round 1 or later) splits.
+  private List<SupportRule> splitRules;
+  private final RuleSplit[] splits = new RuleSplit[Side.values().length * 2];
 
   // The engine's SupportRuleSort, restricted to the ordering that changes how much support a capped
   // receiver gets: the strongest bonus first, then fewest target unit-types first (so a
@@ -56,15 +63,13 @@ public class ReferenceSupportResolver implements SupportResolver {
       final List<SupportRule> rules,
       final int round) {
     final Map<CombatProfile, Integer> base = activeProfileCounts(force);
-    final List<SupportRule> applicable =
-        rules.stream().filter(rule -> applies(rule, side, round)).toList();
+    final RuleSplit split = split(rules, side, round);
+    final List<SupportRule> applicable = split.applicable();
     if (applicable.isEmpty()) {
       return base;
     }
-    final List<SupportRule> friendlyRules =
-        applicable.stream().filter(r -> !r.fromEnemy()).toList();
-    final List<SupportRule> enemyRules =
-        applicable.stream().filter(SupportRule::fromEnemy).toList();
+    final List<SupportRule> friendlyRules = split.friendly();
+    final List<SupportRule> enemyRules = split.enemy();
     // Enemy (debuff) supporters come from the opposing force; the engine builds a separate
     // AvailableSupports for each relationship, so friendly and enemy caps never share counters.
     final Map<CombatProfile, Integer> enemyBase = activeProfileCounts(enemy);
@@ -80,7 +85,7 @@ public class ReferenceSupportResolver implements SupportResolver {
     final Map<CombatProfile, Integer> evaluated = new LinkedHashMap<>();
     final List<CombatProfile> receivers = new ArrayList<>();
     for (final CombatProfile profile : base.keySet()) {
-      if (isReceiver(profile, applicable)) {
+      if (isReceiver(profile, split.receivedCategories())) {
         receivers.add(profile);
       } else {
         evaluated.merge(profile, base.get(profile), Integer::sum);
@@ -106,9 +111,50 @@ public class ReferenceSupportResolver implements SupportResolver {
     return rule.side() == side && (!rule.firstRoundOnly() || round == 1);
   }
 
-  private static boolean isReceiver(final CombatProfile profile, final List<SupportRule> rules) {
-    return rules.stream().anyMatch(rule -> profile.receives().contains(rule.to()));
+  /** Whether any applicable rule supports a category the profile receives. */
+  private static boolean isReceiver(
+      final CombatProfile profile, final Set<SupportCategory> receivedCategories) {
+    for (final SupportCategory category : profile.receives()) {
+      if (receivedCategories.contains(category)) {
+        return true;
+      }
+    }
+    return false;
   }
+
+  /**
+   * The rules that apply to a side in a round, split as resolve() uses them. They depend on the
+   * round only through {@code firstRoundOnly}, so each rule list has four splits; they're cached
+   * for the list last seen (one per scenario; a resolver serves one simulator thread).
+   */
+  private RuleSplit split(final List<SupportRule> rules, final Side side, final int round) {
+    if (rules != splitRules) {
+      Arrays.fill(splits, null);
+      splitRules = rules;
+    }
+    final int index = side.ordinal() * 2 + (round == 1 ? 1 : 0);
+    RuleSplit split = splits[index];
+    if (split == null) {
+      final List<SupportRule> applicable =
+          rules.stream().filter(rule -> applies(rule, side, round)).toList();
+      final Set<SupportCategory> received = new HashSet<>();
+      applicable.forEach(rule -> received.add(rule.to()));
+      split =
+          new RuleSplit(
+              applicable,
+              applicable.stream().filter(r -> !r.fromEnemy()).toList(),
+              applicable.stream().filter(SupportRule::fromEnemy).toList(),
+              received);
+      splits[index] = split;
+    }
+    return split;
+  }
+
+  private record RuleSplit(
+      List<SupportRule> applicable,
+      List<SupportRule> friendly,
+      List<SupportRule> enemy,
+      Set<SupportCategory> receivedCategories) {}
 
   /**
    * One partition's (strength or roll) allocatable support: the rules that apply, grouped by bonus
