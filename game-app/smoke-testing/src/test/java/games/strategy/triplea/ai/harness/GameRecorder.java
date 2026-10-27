@@ -599,6 +599,7 @@ final class GameRecorder {
           "pus_bank",
           sideEntry.getValue().stream().mapToInt(p -> p.getResources().getQuantity(pus)).sum());
       r.put("territory_production", territoryProduction(side));
+      r.put("territories", ownedTerritories(side).filter(t -> !t.isWater()).count());
       r.put("combat_loss_tuv", own.combatLoss);
       r.put("combat_loss_by_turn", own.combatLossByTurn);
       r.put("other_loss_tuv", own.otherLoss);
