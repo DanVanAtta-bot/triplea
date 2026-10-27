@@ -1192,12 +1192,16 @@ public class ReferenceBattleSimulator implements BattleSimulator {
 
   /** ACTIVE units that keep a side in the fight; infrastructure and cargo never do. */
   private static int activeCount(final Map<Key, Integer> working) {
-    return working.entrySet().stream()
-        .filter(entry -> entry.getKey().state() == Lifecycle.ACTIVE)
-        .filter(entry -> !isInfrastructure(entry.getKey().profile()))
-        .filter(entry -> !isDependent(entry.getKey().profile()))
-        .mapToInt(Map.Entry::getValue)
-        .sum();
+    int count = 0;
+    for (final Map.Entry<Key, Integer> entry : working.entrySet()) {
+      final Key key = entry.getKey();
+      if (key.state() == Lifecycle.ACTIVE
+          && !isInfrastructure(key.profile())
+          && !isDependent(key.profile())) {
+        count += entry.getValue();
+      }
+    }
+    return count;
   }
 
   private static int totalCount(final Map<Key, Integer> working) {
