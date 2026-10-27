@@ -78,4 +78,23 @@ public enum ProAiPatch {
    * reach it next turn first, and buys there only units fast enough to join the attack.
    */
   KILL_PURCHASE,
+  /**
+   * Log only: at purchase, logs the kill-strike clocks ({@code ProClockUtils}) of the player's
+   * alliance against each live enemy capital and of its enemies against its own capital. Counts a
+   * hit per purchase. Changes no decision.
+   */
+  CLOCK_LOG,
+  /**
+   * When the enemies' kill-strike clock on the player's capital is at most {@code
+   * ProPurchaseAi.CLOCK_RESERVE_ROUNDS}, purchase first buys the best defensive land units the
+   * capital can place, as the clock's defence bound assumes it will.
+   */
+  CAPITAL_CLOCK_RESERVE,
+  /**
+   * Purchase picks a strike round T: the kill-strike clock of the player's alliance on the nearest
+   * live enemy capital, if the enemies' clock on the player's capital is longer. At each factory
+   * with a land route to that capital, it buys only land units fast enough to arrive by T (so
+   * infantry while T is far, then only fast units). Stock purchase when there is no such T.
+   */
+  STRIKE_TIMED_PURCHASE,
 }

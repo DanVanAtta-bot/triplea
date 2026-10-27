@@ -26,6 +26,7 @@ import games.strategy.triplea.ai.pro.data.ProTerritory;
 import games.strategy.triplea.ai.pro.data.ProTerritoryManager;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
+import games.strategy.triplea.ai.pro.util.ProClockUtils;
 import games.strategy.triplea.ai.pro.util.ProKillUtils;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
@@ -65,6 +66,10 @@ class ProPurchaseAi {
   private ProResourceTracker resourceTracker;
   private ProTerritoryManager territoryManager;
   private boolean isBid = false;
+  // CAPITAL_CLOCK_RESERVE acts when the enemies' clock on my capital is at most this many rounds.
+  static final int CLOCK_RESERVE_ROUNDS = 3;
+  // STRIKE_TIMED_PURCHASE: least movement of land units bought at each factory this turn.
+  private Map<Territory, Integer> strikeMinMovement = Map.of();
   // KILL_PURCHASE: factories whose new units can join next turn's capital attack, by land distance.
   private Map<Territory, Integer> killFactoryDistance = Map.of();
 
@@ -307,6 +312,8 @@ class ProPurchaseAi {
         purchaseOptions.getAirOptions(),
         true);
 
+    applyClockGates(purchaseTerritories, purchaseOptions);
+
     // Find strategic value for each territory
     ProLogger.info("Find strategic value for place territories");
     final Set<Territory> territoriesToCheck = new HashSet<>();
@@ -439,6 +446,130 @@ class ProPurchaseAi {
         }
       }
     }
+  }
+
+  /**
+   * CLOCK_LOG, CAPITAL_CLOCK_RESERVE and STRIKE_TIMED_PURCHASE: kill-strike clocks at purchase. The
+   * reserve gate buys the capital's defenders first when the enemies' clock on it is short; the
+   * strike gate sets the minimum speed of land units bought at each factory.
+   */
+  private void applyClockGates(
+      final Map<Territory, ProPurchaseTerritory> purchaseTerritories,
+      final ProPurchaseOptionMap purchaseOptions) {
+    strikeMinMovement = Map.of();
+    final boolean log = proData.hasPatch(ProAiPatch.CLOCK_LOG);
+    final boolean reserve = proData.hasPatch(ProAiPatch.CAPITAL_CLOCK_RESERVE);
+    final boolean strike = proData.hasPatch(ProAiPatch.STRIKE_TIMED_PURCHASE);
+    if (!log && !reserve && !strike) {
+      return;
+    }
+    final Territory capital = proData.getMyCapital();
+    final int theirClock =
+        capital == null || !capital.isOwnedBy(player)
+            ? ProClockUtils.NONE
+            : ProClockUtils.timeToKill(data, ProUtils.getEnemyPlayers(player), capital, false, 6);
+    final List<GamePlayer> alliance = new ArrayList<>(ProUtils.getAlliedPlayersInTurnOrder(player));
+    if (!alliance.contains(player)) {
+      alliance.add(player);
+    }
+    Territory target = null;
+    int myClock = ProClockUtils.NONE;
+    final StringBuilder sb = new StringBuilder();
+    for (final Territory c : ProUtils.getLiveEnemyCapitals(data, player)) {
+      final int economy =
+          ProClockUtils.timeToKill(data, alliance, c, ProClockUtils.Mix.ECONOMY, true, 6);
+      final int fast = ProClockUtils.timeToKill(data, alliance, c, ProClockUtils.Mix.FAST, true, 6);
+      sb.append(' ').append(c.getName()).append('=').append(economy).append('/').append(fast);
+      if (Math.min(economy, fast) < myClock) {
+        myClock = Math.min(economy, fast);
+        target = c;
+      }
+    }
+    if (log) {
+      proData.isPatchOn(ProAiPatch.CLOCK_LOG);
+      ProLogger.info(
+          "CLOCK round="
+              + data.getSequence().getRound()
+              + " player="
+              + player.getName()
+              + " mine(economy/fast):"
+              + sb
+              + " theirs on "
+              + (capital == null ? "-" : capital.getName())
+              + "="
+              + theirClock);
+    }
+    if (strike && target != null && myClock < theirClock) {
+      final Map<Territory, Integer> minMovement = new HashMap<>();
+      for (final Territory f : purchaseTerritories.keySet()) {
+        if (f.isWater()) {
+          continue;
+        }
+        final int d =
+            data.getMap()
+                .getDistanceIgnoreEndForCondition(
+                    f, target, ProMatches.territoryCanPotentiallyMoveLandUnits(player));
+        if (d > myClock) {
+          minMovement.put(f, (d + myClock - 1) / myClock);
+        }
+      }
+      if (!minMovement.isEmpty()) {
+        proData.isPatchOn(ProAiPatch.STRIKE_TIMED_PURCHASE);
+        strikeMinMovement = minMovement;
+        ProLogger.info(
+            player.getName()
+                + " STRIKE_TIMED_PURCHASE target="
+                + target.getName()
+                + " T="
+                + myClock
+                + " theirs="
+                + theirClock
+                + " minMovement="
+                + minMovement);
+      }
+    }
+    if (!reserve || capital == null || theirClock > CLOCK_RESERVE_ROUNDS) {
+      return;
+    }
+    final ProPurchaseTerritory ppt = purchaseTerritories.get(capital);
+    if (ppt == null) {
+      return;
+    }
+    final ProPlaceTerritory place =
+        ppt.getCanPlaceTerritories().stream()
+            .filter(p -> p.getTerritory().equals(capital))
+            .findFirst()
+            .orElse(null);
+    if (place == null) {
+      return;
+    }
+    final Optional<ProPurchaseOption> best =
+        ProPurchaseValidationUtils.findPurchaseOptionsForTerritory(
+                proData, player, purchaseOptions.getLandOptions(), capital, isBid)
+            .stream()
+            .filter(o -> o.getCost() > 0 && o.getDefense() > 0)
+            .max(
+                Comparator.comparingDouble(
+                    o -> (2.0 * o.getHitPoints() + o.getDefense()) / o.getCost()));
+    if (best.isEmpty()) {
+      return;
+    }
+    proData.isPatchOn(ProAiPatch.CAPITAL_CLOCK_RESERVE);
+    int bought = 0;
+    while (resourceTracker.hasEnough(best.get())
+        && ppt.getRemainingUnitProduction() >= best.get().getQuantity()) {
+      resourceTracker.purchase(best.get());
+      addUnitsToPlace(place, best.get().createTempUnits());
+      bought += best.get().getQuantity();
+    }
+    ProLogger.info(
+        player.getName()
+            + " CAPITAL_CLOCK_RESERVE clock="
+            + theirClock
+            + " bought "
+            + bought
+            + " "
+            + best.get().getUnitType().getName());
   }
 
   private boolean shouldSaveUpForAFleet(
@@ -1159,12 +1290,26 @@ class ProPurchaseAi {
       final List<ProPurchaseOption> landDefenseOptions =
           ProPurchaseValidationUtils.findPurchaseOptionsForTerritory(
               proData, player, purchaseOptions.getLandDefenseOptions(), t, isBid);
+      final Integer minMovement = strikeMinMovement.get(t);
+      if (minMovement != null
+          && landAttackOptions.stream().anyMatch(o -> o.getMovement() >= minMovement)) {
+        // Only units that reach the strike target by the strike round
+        landFodderOptions.removeIf(o -> o.getMovement() < minMovement);
+        landAttackOptions.removeIf(o -> o.getMovement() < minMovement);
+        landDefenseOptions.removeIf(o -> o.getMovement() < minMovement);
+        if (landFodderOptions.isEmpty()) {
+          landFodderOptions.addAll(landAttackOptions);
+        }
+      }
       final Integer killDistance = killFactoryDistance.get(t);
       if (killDistance != null) {
         // Only units that can join next turn's capital attack
         landFodderOptions.removeIf(o -> o.getMovement() < killDistance);
         landAttackOptions.removeIf(o -> o.getMovement() < killDistance);
         landDefenseOptions.removeIf(o -> o.getMovement() < killDistance);
+        if (landFodderOptions.isEmpty()) {
+          landFodderOptions.addAll(landAttackOptions);
+        }
       }
 
       // Determine enemy distance and locally owned units
