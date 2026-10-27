@@ -12,6 +12,7 @@ import games.strategy.engine.data.Unit;
 import games.strategy.engine.data.UnitType;
 import games.strategy.triplea.Constants;
 import games.strategy.triplea.UnitUtils;
+import games.strategy.triplea.ai.pro.ProAiPatch;
 import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.ai.pro.data.ProPlaceTerritory;
 import games.strategy.triplea.ai.pro.data.ProPurchaseOption;
@@ -194,6 +195,8 @@ public final class ProPurchaseUtils {
         CollectionUtils.getMatches(
             ownedAndNotConqueredFactoryTerritories,
             ProMatches.territoryCanMoveLandUnits(player, false));
+    ownedAndNotConqueredFactoryTerritories =
+        withoutSimulatedConquests(proData, ownedAndNotConqueredFactoryTerritories);
 
     // Create purchase territory holder for each factory territory
     return getProPurchaseTerritoryMapFromTerritories(
@@ -202,6 +205,22 @@ public final class ProPurchaseUtils {
           final int unitProduction = getUnitProduction(t, player);
           return new ProPurchaseTerritory(t, data, player, unitProduction);
         });
+  }
+
+  /**
+   * With {@link ProAiPatch#PURCHASE_SIM_CONQUERED}, drops territories conquered on the simulated
+   * board the purchase plans on. The engine refuses to produce in them this turn, so units planned
+   * there are lost.
+   */
+  public static List<Territory> withoutSimulatedConquests(
+      final ProData proData, final List<Territory> territories) {
+    final List<Territory> notConquered =
+        CollectionUtils.getMatches(territories, ProMatches.territoryIsNotConqueredOnItsBoard());
+    if (notConquered.size() < territories.size()
+        && proData.isPatchOn(ProAiPatch.PURCHASE_SIM_CONQUERED)) {
+      return notConquered;
+    }
+    return territories;
   }
 
   private static int getUnitProduction(final Territory territory, final GamePlayer player) {

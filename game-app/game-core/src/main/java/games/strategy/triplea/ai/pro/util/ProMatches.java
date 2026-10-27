@@ -440,6 +440,15 @@ public final class ProMatches {
             && Matches.isTerritoryOwnedBy(player).and(Matches.territoryIsLand()).test(t);
   }
 
+  /**
+   * The territory wasn't conquered this turn on its own board. {@link
+   * #territoryIsNotConqueredOwnedLand} asks {@code player}'s board instead, and the purchase phase
+   * plans on a simulated copy with the real player, so that check misses the planned captures.
+   */
+  public static Predicate<Territory> territoryIsNotConqueredOnItsBoard() {
+    return t -> !AbstractMoveDelegate.getBattleTracker(t.getData()).wasConquered(t);
+  }
+
   public static Predicate<Territory> territoryIsWaterAndAdjacentToOwnedFactory(
       final GamePlayer player) {
     final Predicate<Territory> hasOwnedFactoryNeighbor =

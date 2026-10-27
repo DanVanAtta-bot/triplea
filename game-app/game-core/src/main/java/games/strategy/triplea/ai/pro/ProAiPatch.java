@@ -39,4 +39,11 @@ public enum ProAiPatch {
    * leaves no attacking land unit. Stock transfers ownership after every simulated battle.
    */
   PURCHASE_SIM_NO_PHANTOM,
+  /**
+   * The purchase no longer plans units or factories for a territory the simulated turn conquers.
+   * Stock asks the real board's battle tracker, which has no conquests yet during purchase, so it
+   * plans production in captured or liberated factories (eg Southern Europe retaken) and factories
+   * on fresh captures; the engine refuses both ("conquered this turn") and the units are lost.
+   */
+  PURCHASE_SIM_CONQUERED,
 }
