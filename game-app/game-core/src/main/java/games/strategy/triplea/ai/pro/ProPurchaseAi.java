@@ -26,6 +26,7 @@ import games.strategy.triplea.ai.pro.data.ProTerritory;
 import games.strategy.triplea.ai.pro.data.ProTerritoryManager;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
+import games.strategy.triplea.ai.pro.util.ProKillUtils;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
@@ -64,6 +65,8 @@ class ProPurchaseAi {
   private ProResourceTracker resourceTracker;
   private ProTerritoryManager territoryManager;
   private boolean isBid = false;
+  // KILL_PURCHASE: factories whose new units can join next turn's capital attack, by land distance.
+  private Map<Territory, Integer> killFactoryDistance = Map.of();
 
   ProPurchaseAi(final AbstractProAi ai) {
     this.calc = ai.getCalc();
@@ -323,6 +326,8 @@ class ProPurchaseAi {
       }
     }
 
+    applyKillTest(purchaseTerritories);
+
     // Prioritize land place options purchase AA then land units
     final List<ProPlaceTerritory> prioritizedLandTerritories =
         prioritizeLandTerritories(purchaseTerritories);
@@ -387,6 +392,53 @@ class ProPurchaseAi {
 
     territoryManager = null;
     return purchaseTerritories;
+  }
+
+  /**
+   * KILL_DETECT / KILL_PURCHASE: if an enemy capital falls next turn with this turn's PUs, place at
+   * the factories that reach it first (KILL_PURCHASE only).
+   */
+  private void applyKillTest(final Map<Territory, ProPurchaseTerritory> purchaseTerritories) {
+    killFactoryDistance = Map.of();
+    final boolean detect = proData.hasPatch(ProAiPatch.KILL_DETECT);
+    final boolean act = proData.hasPatch(ProAiPatch.KILL_PURCHASE);
+    if (!detect && !act) {
+      return;
+    }
+    final Optional<ProKillUtils.KillTarget> kill =
+        ProKillUtils.findNextTurnKill(proData, calc, purchaseTerritories);
+    if (kill.isEmpty()) {
+      return;
+    }
+    ProLogger.info(
+        player.getName()
+            + " kill target "
+            + kill.get().capital().getName()
+            + " win="
+            + kill.get().winPercentage()
+            + " needsPurchase="
+            + kill.get().needsPurchase()
+            + " factories="
+            + kill.get().factoryDistance());
+    if (detect) {
+      proData.isPatchOn(ProAiPatch.KILL_DETECT);
+    }
+    if (!act || kill.get().factoryDistance().isEmpty()) {
+      return;
+    }
+    proData.isPatchOn(ProAiPatch.KILL_PURCHASE);
+    killFactoryDistance = kill.get().factoryDistance();
+    for (final ProPurchaseTerritory ppt : purchaseTerritories.values()) {
+      final Integer d = killFactoryDistance.get(ppt.getTerritory());
+      if (d == null) {
+        continue;
+      }
+      for (final ProPlaceTerritory place : ppt.getCanPlaceTerritories()) {
+        if (place.getTerritory().equals(ppt.getTerritory())) {
+          place.setStrategicValue(place.getStrategicValue() + 1000.0 / d);
+        }
+      }
+    }
   }
 
   private boolean shouldSaveUpForAFleet(
@@ -1107,6 +1159,13 @@ class ProPurchaseAi {
       final List<ProPurchaseOption> landDefenseOptions =
           ProPurchaseValidationUtils.findPurchaseOptionsForTerritory(
               proData, player, purchaseOptions.getLandDefenseOptions(), t, isBid);
+      final Integer killDistance = killFactoryDistance.get(t);
+      if (killDistance != null) {
+        // Only units that can join next turn's capital attack
+        landFodderOptions.removeIf(o -> o.getMovement() < killDistance);
+        landAttackOptions.removeIf(o -> o.getMovement() < killDistance);
+        landDefenseOptions.removeIf(o -> o.getMovement() < killDistance);
+      }
 
       // Determine enemy distance and locally owned units
       int enemyDistance =

@@ -68,4 +68,14 @@ public enum ProAiPatch {
    * run out, so the US spent half its money on navy. Counts a hit per transport skipped.
    */
   BUY_TRANSPORTS_ON_DEMAND,
+  /**
+   * Log only: at purchase, runs the next-turn kill test ({@code ProKillUtils}) and counts a hit
+   * when an enemy capital passes it. Changes no decision.
+   */
+  KILL_DETECT,
+  /**
+   * When the next-turn kill test finds an enemy capital, purchase places at the factories that can
+   * reach it next turn first, and buys there only units fast enough to join the attack.
+   */
+  KILL_PURCHASE,
 }

@@ -65,6 +65,11 @@ public final class ProData {
     this.patches = Set.copyOf(patches);
   }
 
+  /** Like {@link #isPatchOn} but doesn't count a hit; for deciding whether to compute a gate. */
+  public boolean hasPatch(final ProAiPatch patch) {
+    return patches.contains(patch);
+  }
+
   public boolean isPatchOn(final ProAiPatch patch) {
     if (!patches.contains(patch)) {
       return false;
