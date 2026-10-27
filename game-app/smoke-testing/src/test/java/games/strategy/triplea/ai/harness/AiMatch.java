@@ -48,15 +48,15 @@ import javax.annotation.Nullable;
  * <p>Args: {@code --map <xml> --patched <alliance> --patches <P1,P2|none> [--baseline-patches
  * <P1,P2|none>] --rounds <cap> [--calc bounded|concurrent] [--props "Name=value,Name2=value"]
  * [--bid <file.bid.json>] [--swap] [--repeat <n>] [--out <dir>] [--odds-runs <n>] [--recorder-odds
- * concurrent|bounded|off] [--flag-combat <tuv>] [--flag-odds <0..1>] [--scripts
- * <player:round:file.json,...>] [--seed <long>]}. {@code --seed} fixes the game dice, the AI's
- * calculator dice and its random purchase pick, and writes {@code history.txt} (every move and
- * roll) next to the records, so a build change can be checked move-by-move. {@code --scripts} plays
- * that player's turn of that round from a kata script (see {@link KataScript}; phases the script
- * leaves out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a second
- * game with the patched set given to the other alliance (two-alliance maps only). {@code --bid}
- * applies a fixed bid before round 1, see {@link FixedBid}. {@code --props} overrides game options
- * by their exact XML name; Tech Development is always forced off. Every game writes {@code
+ * concurrent|bounded|off] [--no-recorder-saves] [--flag-combat <tuv>] [--flag-odds <0..1>]
+ * [--scripts <player:round:file.json,...>] [--seed <long>]}. {@code --seed} fixes the game dice,
+ * the AI's calculator dice and its random purchase pick, and writes {@code history.txt} (every move
+ * and roll) next to the records, so a build change can be checked move-by-move. {@code --scripts}
+ * plays that player's turn of that round from a kata script (see {@link KataScript}; phases the
+ * script leaves out, and every other turn, are the player's side's Hard AI). {@code --swap} plays a
+ * second game with the patched set given to the other alliance (two-alliance maps only). {@code
+ * --bid} applies a fixed bid before round 1, see {@link FixedBid}. {@code --props} overrides game
+ * options by their exact XML name; Tech Development is always forced off. Every game writes {@code
  * <out>/<game id>/} with {@code game.json}, {@code records.jsonl} and the saves of flagged rounds;
  * see {@link GameRecorder}. {@code --decisive <rounds:tuvLead%:productionLead%>} ends a game early,
  * won by the side that has been decisively ahead for that many round ends (see {@link
@@ -101,7 +101,8 @@ public final class AiMatch {
             Integer.parseInt(opts.getOrDefault("odds-runs", "500")),
             Integer.parseInt(opts.getOrDefault("flag-combat", "50")),
             Double.parseDouble(opts.getOrDefault("flag-odds", "0.6")),
-            opts.getOrDefault("recorder-odds", "concurrent"));
+            opts.getOrDefault("recorder-odds", "concurrent"),
+            !opts.containsKey("no-recorder-saves"));
     final Map<String, Object> runConfig = new LinkedHashMap<>();
     runConfig.put("map", map);
     runConfig.put("round_cap", roundCap);
@@ -723,6 +724,7 @@ public final class AiMatch {
           Map.entry("out", "<dir>"),
           Map.entry("odds-runs", "<n>"),
           Map.entry("recorder-odds", "concurrent|bounded|off"),
+          Map.entry("no-recorder-saves", ""),
           Map.entry("flag-combat", "<tuv>"),
           Map.entry("flag-odds", "<0..1>"),
           Map.entry("start", "<export.jsonl>@<round>@<player>"),

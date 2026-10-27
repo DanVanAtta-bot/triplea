@@ -71,9 +71,10 @@ final class GameRecorder {
    * ConcurrentBattleCalculator, the default), {@code bounded} (the AI's engine-free calculator, ~4x
    * cheaper per run) or {@code off} (no harness odds: those fields are null and the risky-battle
    * flag never fires). The harness calculator runs on its own dice and, for concurrent, its own
-   * copy of the game, so the choice never changes the game being played.
+   * copy of the game, so the choice never changes the game being played. {@code saves} false skips
+   * the Purchase-step ring saves, so flagged rounds keep no saves ({@code saves_kept} stays empty).
    */
-  record Options(int oddsRuns, int flagCombat, double flagOdds, String oddsCalc) {
+  record Options(int oddsRuns, int flagCombat, double flagOdds, String oddsCalc, boolean saves) {
     static final List<String> ODDS_CALCS = List.of("concurrent", "bounded", "off");
 
     Options {
@@ -244,6 +245,7 @@ final class GameRecorder {
     this.config.put("turn_order", turnOrder.stream().map(GamePlayer::getName).toList());
     this.config.put("odds_runs", options.oddsOff() ? 0 : options.oddsRuns());
     this.config.put("harness_odds_calc", options.oddsCalc());
+    this.config.put("recorder_saves", options.saves());
     this.config.put(
         "flag_rules",
         Map.of(
@@ -310,7 +312,8 @@ final class GameRecorder {
     }
     if (delegate instanceof PurchaseDelegate
         && !(delegate instanceof BidPurchaseDelegate)
-        && stepPlayer != null) {
+        && stepPlayer != null
+        && options.saves()) {
       saveToRing();
     }
     pendingBattles = delegate instanceof BattleDelegate ? capturePendingBattles() : List.of();
