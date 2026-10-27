@@ -33,6 +33,7 @@ import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
 import games.strategy.triplea.ai.pro.util.ProPurchaseValidationUtils;
+import games.strategy.triplea.ai.pro.util.ProSupplyUtils;
 import games.strategy.triplea.ai.pro.util.ProTerritoryValueUtils;
 import games.strategy.triplea.ai.pro.util.ProTransportUtils;
 import games.strategy.triplea.ai.pro.util.ProUtils;
@@ -79,6 +80,8 @@ class ProPurchaseAi {
   private boolean danNoNavy = false;
   // DAN_PINS: least fodder share at a holdable place territory the enemy can attack.
   static final int PAD_FODDER_PERCENT = 85;
+  // DAN_FACTORY: rounds over which a new factory's extra arrival at the target is counted.
+  static final int FACTORY_HORIZON = 6;
 
   ProPurchaseAi(final AbstractProAi ai) {
     this.calc = ai.getCalc();
@@ -348,6 +351,8 @@ class ProPurchaseAi {
         prioritizeLandTerritories(purchaseTerritories);
     purchaseAaUnits(
         purchaseTerritories, prioritizedLandTerritories, purchaseOptions.getAaOptions());
+    final Map<Territory, ProPurchaseTerritory> factoryPurchaseTerritories = new HashMap<>();
+    applyDanFactory(factoryPurchaseTerritories, purchaseOptions);
     purchaseLandUnits(purchaseTerritories, prioritizedLandTerritories, purchaseOptions);
 
     // Prioritize sea territories that need defended and purchase additional defenders
@@ -362,7 +367,6 @@ class ProPurchaseAi {
         false);
 
     // Determine whether to purchase new land factory
-    final Map<Territory, ProPurchaseTerritory> factoryPurchaseTerritories = new HashMap<>();
     purchaseFactory(
         factoryPurchaseTerritories,
         purchaseTerritories,
@@ -706,6 +710,111 @@ class ProPurchaseAi {
             + bought
             + " "
             + best.get().getUnitType().getName());
+  }
+
+  /**
+   * DAN_FACTORY: buy a factory where it adds the most strength arriving at the strike target (or
+   * the nearest live enemy capital) within {@link #FACTORY_HORIZON} rounds, when that gain, in PUs
+   * of my best attack unit, is worth more than the factory and my side holds the territory for 2
+   * turns.
+   */
+  private void applyDanFactory(
+      final Map<Territory, ProPurchaseTerritory> factoryPurchaseTerritories,
+      final ProPurchaseOptionMap purchaseOptions) {
+    final ProDanModel.Turn turn = proData.getDanTurn();
+    if (turn == null || !proData.hasPatch(ProAiPatch.DAN_FACTORY) || resourceTracker.isEmpty()) {
+      return;
+    }
+    Territory target =
+        turn.target() == null ? null : data.getMap().getTerritoryOrNull(turn.target());
+    final Territory capital = proData.getMyCapital();
+    if ((target == null || target.isOwnedBy(player)) && capital != null) {
+      target =
+          ProUtils.getLiveEnemyCapitals(data, player).stream()
+              .filter(c -> data.getMap().getDistance(capital, c) >= 0)
+              .min(Comparator.comparingInt(c -> data.getMap().getDistance(capital, c)))
+              .orElse(null);
+    }
+    if (target == null) {
+      return;
+    }
+    final List<GamePlayer> me = List.of(player);
+    final ProSupplyUtils.Arrival base =
+        ProSupplyUtils.arrival(data, me, target, true, true, FACTORY_HORIZON, Set.of(), null);
+    final double perPu =
+        purchaseOptions.getLandOptions().stream()
+            .filter(o -> o.getCost() > 0 && o.getAttack() > 0)
+            .mapToDouble(o -> (2.0 * o.getHitPoints() + o.getAttack()) / o.getCost())
+            .max()
+            .orElse(0);
+    if (perPu <= 0) {
+      return;
+    }
+    final List<GamePlayer> alliance = ProDanModel.alliance(player);
+    final List<GamePlayer> enemies = ProUtils.getEnemyPlayers(player);
+    Territory best = null;
+    ProPurchaseOption bestOption = null;
+    double bestGain = 0;
+    for (final Territory c :
+        CollectionUtils.getMatches(
+            data.getMap().getTerritories(),
+            ProMatches.territoryHasNoInfraFactoryAndIsNotConqueredOwnedLand(player))) {
+      if (TerritoryAttachment.getProduction(c) < 2 || factoryPurchaseTerritories.containsKey(c)) {
+        continue;
+      }
+      final List<ProPurchaseOption> options =
+          ProPurchaseValidationUtils.findPurchaseOptionsForTerritory(
+              proData, player, purchaseOptions.getFactoryOptions(), c, isBid);
+      ProPurchaseValidationUtils.removeInvalidPurchaseOptions(
+          proData,
+          player,
+          startOfTurnData,
+          options,
+          resourceTracker,
+          0,
+          List.of(),
+          factoryPurchaseTerritories,
+          1,
+          c);
+      final ProPurchaseOption option =
+          options.stream()
+              .filter(o -> o.getMovement() == 0)
+              .max(Comparator.comparingInt(ProPurchaseOption::getCost))
+              .orElse(null);
+      if (option == null || !resourceTracker.hasEnough(option)) {
+        continue;
+      }
+      final ProSupplyUtils.Arrival with =
+          ProSupplyUtils.arrival(data, me, target, true, true, FACTORY_HORIZON, Set.of(), c);
+      final double gain = (with.at(FACTORY_HORIZON) - base.at(FACTORY_HORIZON)) / perPu;
+      if (gain - option.getCost() > bestGain
+          && ProSupplyUtils.heldTurns(data, alliance, enemies, c, c) >= 2) {
+        best = c;
+        bestOption = option;
+        bestGain = gain - option.getCost();
+      }
+    }
+    if (best == null) {
+      return;
+    }
+    proData.isPatchOn(ProAiPatch.DAN_FACTORY);
+    final ProPurchaseTerritory factoryTerritory = new ProPurchaseTerritory(best, data, player, 0);
+    factoryPurchaseTerritories.put(best, factoryTerritory);
+    for (final ProPlaceTerritory ppt : factoryTerritory.getCanPlaceTerritories()) {
+      if (ppt.getTerritory().equals(best)) {
+        addUnitsToPlace(ppt, bestOption.createTempUnits());
+        resourceTracker.purchase(bestOption);
+      }
+    }
+    ProLogger.info(
+        player.getName()
+            + " DAN_FACTORY at "
+            + best.getName()
+            + " toward "
+            + target.getName()
+            + " net gain "
+            + bestGain
+            + " PUs");
   }
 
   private static double attackPowerPerPu(final ProPurchaseOption o) {

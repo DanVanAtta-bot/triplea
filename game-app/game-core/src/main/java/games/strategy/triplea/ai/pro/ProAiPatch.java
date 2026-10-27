@@ -139,10 +139,26 @@ public enum ProAiPatch {
    * enemy can attack is padded with infantry (cheap hit points against strafes).
    */
   DAN_PINS,
+  /**
+   * Supply lines (Dan's A6/A7): strength each side can have at a territory by each turn, from units
+   * on the board, then purchases from the factories feeding it (capped by their production; a
+   * factory with no land route only through a transport shuttle with naval dominance on the route),
+   * with pinned slow units left behind. Replaces the kill-strike clocks of the other DAN gates,
+   * sets each front's delivery delay, and scales a non-objective capture's worth in combat by the
+   * turns (of 3) my arrival there keeps up with the enemies'.
+   */
+  DAN_SUPPLY,
+  /**
+   * Factories (Dan's A7, "the reason to make factories"): before the land buy, buys a factory where
+   * it adds the most strength arriving at the strike target (or nearest enemy capital) within 6
+   * rounds, if that gain is worth more PUs than the factory and the territory holds for 2 turns.
+   */
+  DAN_FACTORY,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
   public static final Set<ProAiPatch> AI1 =
       Collections.unmodifiableSet(
-          EnumSet.of(DAN_PLAN, DAN_COOKED, DAN_OBJECTIVES, DAN_FRONTS, DAN_PINS));
+          EnumSet.of(
+              DAN_PLAN, DAN_COOKED, DAN_OBJECTIVES, DAN_FRONTS, DAN_PINS, DAN_SUPPLY, DAN_FACTORY));
 }

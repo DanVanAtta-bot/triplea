@@ -340,7 +340,7 @@ public class ProClockUtils {
         / best.getCost();
   }
 
-  private static int airAttackArrival(final int d, final int move) {
+  static int airAttackArrival(final int d, final int move) {
     final int half = move / 2;
     return d <= half ? 1 : 1 + ceilDiv(d - half, move);
   }
@@ -351,11 +351,11 @@ public class ProClockUtils {
     }
   }
 
-  private static int ceilDiv(final int a, final int b) {
+  static int ceilDiv(final int a, final int b) {
     return (a + b - 1) / b;
   }
 
-  private static Map<Territory, Integer> bfs(
+  static Map<Territory, Integer> bfs(
       final GameMap map, final Territory from, final Predicate<Territory> passable) {
     final Map<Territory, Integer> d = new HashMap<>();
     d.put(from, 0);

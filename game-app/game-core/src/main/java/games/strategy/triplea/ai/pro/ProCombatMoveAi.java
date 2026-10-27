@@ -325,7 +325,8 @@ public class ProCombatMoveAi {
               * (1 + isFactory)
               * (1 - 0.5 * isAmphib)
               * productionAndIsCapital.production
-              * ProDanModel.incomeFactor(proData, t);
+              * ProDanModel.incomeFactor(proData, t)
+              * ProDanModel.holdFactor(proData, t);
       double attackValue =
           (tuvSwing + territoryValue)
               * (1 + 4.0 * productionAndIsCapital.isCapital)
@@ -1257,6 +1258,7 @@ public class ProCombatMoveAi {
                         + isCanHold * (1 + 2.0 * isFfa + 1.5 * isFactory + 0.5 * capturableUnits))
                     * production
                     * ProDanModel.incomeFactor(proData, t)
+                    * ProDanModel.holdFactor(proData, t)
                 + capitalValue;
         double tuvSwing = result.getTuvSwing();
         if (isFfa == 1 && tuvSwing > 0) {

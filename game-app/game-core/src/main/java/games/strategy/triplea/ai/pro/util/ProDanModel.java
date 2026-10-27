@@ -84,7 +84,9 @@ public class ProDanModel {
         || proData.hasPatch(ProAiPatch.DAN_COOKED)
         || proData.hasPatch(ProAiPatch.DAN_OBJECTIVES)
         || proData.hasPatch(ProAiPatch.DAN_FRONTS)
-        || proData.hasPatch(ProAiPatch.DAN_PINS);
+        || proData.hasPatch(ProAiPatch.DAN_PINS)
+        || proData.hasPatch(ProAiPatch.DAN_SUPPLY)
+        || proData.hasPatch(ProAiPatch.DAN_FACTORY);
   }
 
   /** Capitals and victory cities: the only objectives in Dan's model. */
@@ -101,6 +103,8 @@ public class ProDanModel {
     final List<GamePlayer> enemies = ProUtils.getEnemyPlayers(player);
     final List<GamePlayer> alliance = alliance(player);
     final boolean pinsOn = proData.hasPatch(ProAiPatch.DAN_PINS);
+    final boolean supplyOn = proData.hasPatch(ProAiPatch.DAN_SUPPLY);
+    proData.getDanHoldCache().clear();
     final Set<Unit> enemyPinned = pinsOn ? pins(data, alliance, enemies).held() : Set.of();
     final Territory capital =
         TerritoryAttachment.getFirstOwnedCapitalOrFirstUnownedCapital(player, data.getMap())
@@ -108,18 +112,18 @@ public class ProDanModel {
     final int theirClock =
         capital == null || !capital.isOwnedBy(player)
             ? NONE
-            : clock(data, enemies, capital, false, enemyPinned);
+            : clock(data, enemies, capital, false, enemyPinned, supplyOn);
 
     // A strike commits the army that casts my pins, so plans race the enemies' unpinned clock
     final int theirFreeClock =
         enemyPinned.isEmpty() || capital == null || !capital.isOwnedBy(player)
             ? theirClock
-            : clock(data, enemies, capital, false, Set.of());
+            : clock(data, enemies, capital, false, Set.of(), supplyOn);
     final Set<Unit> myPinned = pinsOn ? pins(data, enemies, alliance).held() : Set.of();
     Territory clockTarget = null;
     int myClock = NONE;
     for (final Territory c : ProUtils.getLiveEnemyCapitals(data, player)) {
-      final int t = clock(data, alliance, c, true, myPinned);
+      final int t = clock(data, alliance, c, true, myPinned, supplyOn);
       if (t < myClock) {
         myClock = t;
         clockTarget = c;
@@ -154,7 +158,7 @@ public class ProDanModel {
     }
     final Map<String, Front> fronts =
         proData.hasPatch(ProAiPatch.DAN_FRONTS)
-            ? fronts(data, player, alliance, enemies, round, pinsOn)
+            ? fronts(data, player, alliance, enemies, round, pinsOn, supplyOn)
             : Map.of();
     return new Turn(round, target, strikeRound, myClock, theirClock, cooked, decideRound, fronts);
   }
@@ -165,7 +169,11 @@ public class ProDanModel {
       final Collection<GamePlayer> attackers,
       final Territory capital,
       final boolean attackersBuyNow,
-      final Set<Unit> pinned) {
+      final Set<Unit> pinned,
+      final boolean supply) {
+    if (supply) {
+      return ProSupplyUtils.timeToKill(data, attackers, capital, attackersBuyNow, HORIZON, pinned);
+    }
     return Math.min(
         ProClockUtils.timeToKill(
             data, attackers, capital, ProClockUtils.Mix.ECONOMY, attackersBuyNow, HORIZON, pinned),
@@ -259,6 +267,34 @@ public class ProDanModel {
     final double factor = Math.max(0.1, Math.min(1, rounds / 3));
     if (factor < 1) {
       proData.isPatchOn(ProAiPatch.DAN_OBJECTIVES);
+    }
+    return factor;
+  }
+
+  /**
+   * DAN_SUPPLY hold estimate for a non-objective territory: the share of the stock 3 rounds its
+   * income counts, by how many turns (0-3) my side's arrival there keeps up with the enemies' once
+   * I have it; at least 0.1. 1 for objectives or with the gate off. Cached for the turn.
+   */
+  public static double holdFactor(final ProData proData, final Territory t) {
+    if (proData.getDanTurn() == null
+        || !proData.hasPatch(ProAiPatch.DAN_SUPPLY)
+        || t.isWater()
+        || isObjective(t)) {
+      return 1;
+    }
+    final Double cached = proData.getDanHoldCache().get(t.getName());
+    if (cached != null) {
+      return cached;
+    }
+    final GamePlayer player = proData.getPlayer();
+    final int held =
+        ProSupplyUtils.heldTurns(
+            proData.getData(), alliance(player), ProUtils.getEnemyPlayers(player), t, null);
+    final double factor = Math.max(0.1, held / 3.0);
+    proData.getDanHoldCache().put(t.getName(), factor);
+    if (factor < 1) {
+      proData.isPatchOn(ProAiPatch.DAN_SUPPLY);
     }
     return factor;
   }
@@ -381,7 +417,8 @@ public class ProDanModel {
       final List<GamePlayer> alliance,
       final List<GamePlayer> enemies,
       final int round,
-      final boolean pinsOn) {
+      final boolean pinsOn,
+      final boolean supplyOn) {
     final GameMap map = data.getMap();
     final List<GamePlayer> everyone = new ArrayList<>(alliance);
     everyone.addAll(enemies);
@@ -410,7 +447,7 @@ public class ProDanModel {
       final Map<Territory, Integer> land = bfs(map, zone, 99, t -> !t.isWater());
       final Map<Territory, Integer> any = bfs(map, zone, 99, t -> true);
       for (final GamePlayer x : everyone) {
-        final int delay = delay(data, x, land, any);
+        final int delay = delay(data, x, land, any, supplyOn);
         weights.get(x).put(e, delay > MAX_DELAY ? 0 : Math.pow(DELAY_DISCOUNT, delay));
       }
     }
@@ -480,7 +517,8 @@ public class ProDanModel {
       final GameData data,
       final GamePlayer p,
       final Map<Territory, Integer> landFromFront,
-      final Map<Territory, Integer> anyFromFront) {
+      final Map<Territory, Integer> anyFromFront,
+      final boolean supplyOn) {
     int best = NONE;
     for (final Territory f : data.getMap().getTerritoriesOwnedBy(p)) {
       if (!ProMatches.territoryHasInfraFactoryAndIsLand().test(f)) {
@@ -489,6 +527,12 @@ public class ProDanModel {
       final Integer land = landFromFront.get(f);
       if (land != null) {
         best = Math.min(best, Math.max(0, land - 1));
+      } else if (supplyOn) {
+        // DAN_SUPPLY: only a transport shuttle the owner can run, with naval dominance
+        final ProSupplyUtils.Shuttle shuttle = ProSupplyUtils.shuttle(data, p, f, landFromFront);
+        if (shuttle != null) {
+          best = Math.min(best, Math.max(0, shuttle.sailTurns() + shuttle.march() - 1));
+        }
       } else {
         final Integer any = anyFromFront.get(f);
         if (any != null) {
