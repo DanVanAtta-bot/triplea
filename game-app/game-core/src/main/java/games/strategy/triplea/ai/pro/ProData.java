@@ -118,6 +118,11 @@ public final class ProData {
     return true;
   }
 
+  /** Counts a hit for a patch that changed a decision. */
+  public void countPatchHit(final ProAiPatch patch) {
+    patchHits.merge(patch, 1, Integer::sum);
+  }
+
   public Map<ProAiPatch, Integer> getPatchHits() {
     return Map.copyOf(patchHits);
   }

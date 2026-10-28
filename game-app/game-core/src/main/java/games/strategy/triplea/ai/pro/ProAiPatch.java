@@ -211,6 +211,17 @@ public enum ProAiPatch {
    * Counts a hit per sea zone whose starting free deck it raises above 0.
    */
   PURCHASE_CARRIER_DECK_FIX,
+  /**
+   * Non-combat move parks one warship as a blocker in a sea zone that cuts every route enemy
+   * transports have to an own or allied land territory they could otherwise take by landing: the
+   * enemy's max attack wins with its amphibious units and not without them, and no enemy transport
+   * can reach an unload zone next to it once that zone is occupied. Uses the cheapest warship left
+   * after the defensive moves, only in a zone the enemy can't attack; combat move frees one from a
+   * sea attack that wins without it when no idle warship can block. Stock never moves a sea unit
+   * for its blocking effect (the one-unit blocker rule skips sea zones). Counts a hit per blocker
+   * freed or placed.
+   */
+  SEA_BLOCKER,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
