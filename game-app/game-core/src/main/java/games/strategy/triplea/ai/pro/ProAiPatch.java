@@ -255,6 +255,13 @@ public enum ProAiPatch {
    * production, so a 0-PU island that completes a 5-PU objective is worth nothing.
    */
   NO_VALUE,
+  /**
+   * Attacking a land territory (not a strafe), when a round's hits would take the last land unit
+   * while air survives, lose the cheapest air unit instead, even a pricier bomber, unless the
+   * battle calculator gives the attack with the land unit kept under 50% to win. Stock takes the
+   * cheapest casualties first, so a battle won with only air left captures nothing.
+   */
+  CAPTURE_KEEP_LAND,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

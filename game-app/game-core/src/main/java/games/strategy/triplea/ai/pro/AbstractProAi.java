@@ -20,6 +20,7 @@ import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.simulate.ProDummyDelegateBridge;
 import games.strategy.triplea.ai.pro.simulate.ProSimulateTurnUtils;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
+import games.strategy.triplea.ai.pro.util.ProCasualtyUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
@@ -529,13 +530,91 @@ public abstract class AbstractProAi extends AbstractAi {
     // Interleave carriers and planes
     final List<Unit> interleavedTargetList =
         new ArrayList<>(ProTransportUtils.interleaveUnitsCarriersAndPlanes(selectFromSorted, 0));
-    for (int i = 0; i < defaultCasualties.getKilled().size(); ++i) {
-      myCasualties.addToKilled(interleavedTargetList.get(i));
+    List<Unit> killed =
+        new ArrayList<>(interleavedTargetList.subList(0, defaultCasualties.getKilled().size()));
+    if (proData.hasPatch(ProAiPatch.CAPTURE_KEEP_LAND)) {
+      killed =
+          keepLandToCapture(
+              killed,
+              selectFrom,
+              defaultCasualties.getDamaged(),
+              hit,
+              friendlyUnits,
+              enemyUnits,
+              battleId,
+              battleSite);
     }
+    killed.forEach(myCasualties::addToKilled);
     if (count != myCasualties.size()) {
       throw new IllegalStateException("AI chose wrong number of casualties");
     }
     return myCasualties;
+  }
+
+  /** CAPTURE_KEEP_LAND: see {@link ProAiPatch#CAPTURE_KEEP_LAND}. */
+  private List<Unit> keepLandToCapture(
+      final List<Unit> killed,
+      final Collection<Unit> selectFrom,
+      final Collection<Unit> damaged,
+      final GamePlayer hit,
+      final Collection<Unit> friendlyUnits,
+      final Collection<Unit> enemyUnits,
+      final UUID battleId,
+      final Territory battleSite) {
+    final GamePlayer player = getGamePlayer();
+    if (battleSite.isWater()
+        || !player.equals(hit)
+        || storedStrafingTerritories.contains(battleSite)) {
+      return killed;
+    }
+    final IBattle battle =
+        getGameData().getBattleDelegate().getBattleTracker().getPendingBattle(battleId);
+    final Collection<Unit> attackersAlive;
+    final Collection<Unit> defendersLeft;
+    if (battle != null) {
+      if (!player.equals(battle.getAttacker())) {
+        return killed;
+      }
+      attackersAlive = battle.getAttackingUnits();
+      defendersLeft = battle.getDefendingUnits();
+    } else {
+      // No pending battle (AA fire in a move, or a direct call): attacking if the land is enemy.
+      if (!Matches.isTerritoryEnemy(player).test(battleSite)) {
+        return killed;
+      }
+      attackersAlive = friendlyUnits;
+      defendersLeft = enemyUnits;
+    }
+    final Optional<ProCasualtyUtils.KeepLandSwap> swap =
+        ProCasualtyUtils.findKeepLandSwap(
+            killed, attackersAlive, selectFrom, damaged, u -> ProPurchaseUtils.getCost(proData, u));
+    if (swap.isEmpty()) {
+      return killed;
+    }
+    final List<Unit> withLand = new ArrayList<>(attackersAlive);
+    withLand.removeAll(swap.get().apply(killed));
+    final Collection<Unit> defenders =
+        CollectionUtils.getMatches(defendersLeft, Matches.unitIsNotInfrastructure());
+    final double keepLandWin =
+        defenders.isEmpty()
+            ? 100
+            : calc.calculateBattleResultsNoSubmerge(
+                    proData, battleSite, withLand, defenders, new HashSet<>())
+                .getWinPercentage();
+    ProLogger.debug(
+        player.getName()
+            + " keep-land check at "
+            + battleSite.getName()
+            + ": keep "
+            + swap.get().landToKeep().getType().getName()
+            + ", lose "
+            + swap.get().airToLose().getType().getName()
+            + ", win% with land kept="
+            + keepLandWin);
+    if (keepLandWin < 50 || !proData.isPatchOn(ProAiPatch.CAPTURE_KEEP_LAND)) {
+      return killed;
+    }
+    return swap.get().apply(killed);
   }
 
   @Override
