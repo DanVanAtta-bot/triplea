@@ -4,6 +4,7 @@ import games.strategy.engine.framework.I18nEngineFramework;
 import games.strategy.engine.player.Player;
 import games.strategy.triplea.ai.fast.FastAi;
 import games.strategy.triplea.ai.pro.ProAi;
+import games.strategy.triplea.ai.pro.ProAiPatchSpec;
 import games.strategy.triplea.ai.weak.WeakAi;
 import java.util.Collection;
 import java.util.List;
@@ -17,6 +18,8 @@ import lombok.Value;
 public class PlayerTypes {
 
   public static final String DOES_NOTHING_PLAYER_LABEL = "Does Nothing (AI)";
+  // Patch specs for the Hard AI, eg: -Dtriplea.ai.patches=DAN_COOKED,AMPHIB_CAN_OPENER@Axis
+  public static final String AI_PATCHES_PROPERTY = "triplea.ai.patches";
   public static final Type WEAK_AI =
       new Type(I18nEngineFramework.get().getText("startup.PlayerTypes.PLAYER_TYPE_AI_EASY_LABEL")) {
         @Override
@@ -35,7 +38,10 @@ public class PlayerTypes {
       new Type(I18nEngineFramework.get().getText("startup.PlayerTypes.PLAYER_TYPE_AI_HARD_LABEL")) {
         @Override
         public Player newPlayerWithName(final String name) {
-          return new ProAi(name, getLabel());
+          final String patches = System.getProperty(AI_PATCHES_PROPERTY, "");
+          return patches.isBlank()
+              ? new ProAi(name, getLabel())
+              : ProAi.withPatchSpecs(name, getLabel(), ProAiPatchSpec.parseList(patches));
         }
       };
   public static final String PLAYER_TYPE_DEFAULT_LABEL =

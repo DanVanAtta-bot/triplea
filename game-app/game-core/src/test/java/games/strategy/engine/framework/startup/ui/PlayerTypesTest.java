@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import games.strategy.engine.player.Player;
+import games.strategy.triplea.ai.pro.ProAi;
+import games.strategy.triplea.ai.pro.ProAiPatchSpec;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +37,28 @@ class PlayerTypesTest {
                       "The name is a passed in parameter, this should still match after construction")
                   .isEqualTo(testName);
             });
+  }
+
+  @Test
+  void hardAiHasNoPatchesWithoutProperty() {
+    System.clearProperty(PlayerTypes.AI_PATCHES_PROPERTY);
+
+    final ProAi ai = (ProAi) PlayerTypes.PRO_AI.newPlayerWithName("Germans");
+
+    assertThat(ai.getProData().getPatchSpecs()).isEmpty();
+  }
+
+  @Test
+  void hardAiTakesPatchesFromProperty() {
+    System.setProperty(PlayerTypes.AI_PATCHES_PROPERTY, "DAN_COOKED,AMPHIB_CAN_OPENER@Axis");
+    try {
+      final ProAi ai = (ProAi) PlayerTypes.PRO_AI.newPlayerWithName("Germans");
+
+      assertThat(ProAiPatchSpec.labels(ai.getProData().getPatchSpecs()))
+          .containsExactly("AMPHIB_CAN_OPENER@Axis", "DAN_COOKED");
+    } finally {
+      System.clearProperty(PlayerTypes.AI_PATCHES_PROPERTY);
+    }
   }
 
   @Test
