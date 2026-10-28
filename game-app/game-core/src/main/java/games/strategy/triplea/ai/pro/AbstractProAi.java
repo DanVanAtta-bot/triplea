@@ -43,6 +43,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,8 @@ public abstract class AbstractProAi extends AbstractAi {
   private Map<Territory, ProPurchaseTerritory> storedPurchaseTerritories;
   private List<PoliticalActionAttachment> storedPoliticalActions;
   private List<Territory> storedStrafingTerritories;
+  // STRAFE_CANT_HOLD: territory name -> rounds to fight before retreating
+  private Map<String, Integer> storedStrafeRetreats = Map.of();
 
   // Measurement only; never consulted by decision logic.
   @Getter @Setter @Nullable private ProDecisionListener decisionListener;
@@ -111,6 +114,11 @@ public abstract class AbstractProAi extends AbstractAi {
 
   public void setStoredStrafingTerritories(final List<Territory> strafingTerritories) {
     storedStrafingTerritories = strafingTerritories;
+  }
+
+  /** STRAFE_CANT_HOLD: attacks to retreat from once that many rounds are fought, by territory. */
+  public void setStoredStrafeRetreats(final Map<String, Integer> strafeRetreats) {
+    storedStrafeRetreats = Map.copyOf(strafeRetreats);
   }
 
   /**
@@ -375,6 +383,31 @@ public abstract class AbstractProAi extends AbstractAi {
     final double strengthDifference =
         ProBattleUtils.estimateStrengthDifference(battleTerritory, attackers, defenders);
     final boolean isStrafing = isAttacker && storedStrafingTerritories.contains(battleTerritory);
+    final Integer strafeRounds = storedStrafeRetreats.get(battleTerritory.getName());
+    if (isAttacker
+        && !submerge
+        && strafeRounds != null
+        && battle.getBattleRound() >= strafeRounds
+        && !possibleTerritories.isEmpty()
+        && proData.isPatchOn(ProAiPatch.STRAFE_CANT_HOLD)) {
+      // Retreat to the territory holding the most of my units
+      final Territory to =
+          possibleTerritories.stream()
+              .max(
+                  Comparator.comparingInt(
+                      (Territory r) ->
+                          r.getUnitCollection().countMatches(Matches.unitIsOwnedBy(player))))
+              .orElseThrow();
+      ProLogger.info(
+          player.getName()
+              + " STRAFE_CANT_HOLD: retreating from "
+              + battleTerritory
+              + " after round "
+              + battle.getBattleRound()
+              + " to "
+              + to);
+      return Optional.of(to);
+    }
     ProLogger.info(
         player.getName()
             + " checking retreat from territory "

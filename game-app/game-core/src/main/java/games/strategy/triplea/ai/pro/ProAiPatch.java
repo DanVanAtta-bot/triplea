@@ -230,6 +230,17 @@ public enum ProAiPatch {
    * bomber moved to a raid.
    */
   SBR_WHEN_FREE,
+  /**
+   * Combat move strafes land attacks whose expected survivors the counter-attack retakes (judged on
+   * the units actually assigned, not stock's canHold on every unit that could attack): when
+   * fighting 1-2 rounds and retreating gains more TUV than taking the territory (battle TUV swing
+   * plus the territory's worth times win%, minus 2/3 of the counter-attack's TUV swing against the
+   * land units left there) by {@code ProCombatMoveAi.STRAFE_MARGIN}, the attackers retreat after
+   * those rounds to the territory holding the most of their side's units. Stock never retreats from
+   * such an attack, takes the territory and loses the units to the counter-attack (forum A6; LHTR
+   * Germany into Karelia next to the Archangel stack).
+   */
+  STRAFE_CANT_HOLD,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

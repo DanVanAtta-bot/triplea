@@ -51,6 +51,19 @@ import org.triplea.java.collections.CollectionUtils;
 /** Pro combat move AI. */
 public class ProCombatMoveAi {
 
+  /** STRAFE_CANT_HOLD: TUV a strafe must beat taking the territory by. */
+  static final double STRAFE_MARGIN = 2;
+
+  /** STRAFE_CANT_HOLD: most rounds a strafe fights before retreating. */
+  static final int STRAFE_MAX_ROUNDS = 2;
+
+  /**
+   * STRAFE_CANT_HOLD: weight of the enemy's counter-attack swing in a trade's value, as in stock's
+   * attack value. Champion LHTR games: 71% of captures judged can't-hold are retaken within the
+   * round (69% of those that kept 2+ armour).
+   */
+  static final double TRADE_COUNTER_WEIGHT = 2.0 / 3;
+
   private static final int MIN_BOMBING_SCORE = 4; // Avoid bombing low production factories with AA
 
   private final AbstractProAi ai;
@@ -143,6 +156,10 @@ public class ProCombatMoveAi {
     // Determine max enemy counter-attack units and remove territories where transports are exposed
     removeTerritoriesWhereTransportsAreExposed();
 
+    // STRAFE_CANT_HOLD: fight some can't-hold attacks a round or two, then retreat
+    final Map<String, Integer> strafeRetreats =
+        proData.hasPatch(ProAiPatch.STRAFE_CANT_HOLD) ? planStrafes() : Map.of();
+
     // Determine if capital can be held if I still own it
     if (proData.getMyCapital() != null && proData.getMyCapital().isOwnedBy(player)) {
       removeAttacksUntilCapitalCanBeHeld(
@@ -167,6 +184,7 @@ public class ProCombatMoveAi {
 
     // Set strafing territories to avoid retreats
     ai.setStoredStrafingTerritories(territoryManager.getStrafingTerritories());
+    ai.setStoredStrafeRetreats(strafeRetreats);
     ProLogger.info("Strafing territories: " + territoryManager.getStrafingTerritories());
 
     // Log results
@@ -1554,6 +1572,150 @@ public class ProCombatMoveAi {
       prioritizedTerritories.remove(territoryToRemove);
       ProLogger.debug("Removing " + territoryToRemove.getTerritory().getName());
     }
+  }
+
+  /**
+   * STRAFE_CANT_HOLD: for each planned land attack I can't hold, compares taking it (its value as a
+   * trade, see {@link #tradeValue}) with fighting 1 to {@link #STRAFE_MAX_ROUNDS} rounds and
+   * retreating (the TUV swing until the retreat). Returns the attacks to strafe, by territory name,
+   * with the rounds to fight, where strafing beats taking by {@link #STRAFE_MARGIN} and gains TUV.
+   */
+  private Map<String, Integer> planStrafes() {
+    final Map<String, Integer> strafes = new HashMap<>();
+    for (final ProTerritory patd : territoryManager.getAttackOptions().getTerritoryMap().values()) {
+      final Territory t = patd.getTerritory();
+      if (t.isWater()
+          || patd.getUnits().isEmpty()
+          || patd.isStrafing()
+          || !patd.getAmphibAttackMap().isEmpty()
+          || !patd.getBombardTerritoryMap().isEmpty()
+          || patd.getMaxEnemyUnits().isEmpty()
+          || patd.getUnits().stream().noneMatch(Matches.unitIsLand())) {
+        continue;
+      }
+      final List<Unit> defenders = patd.getMaxEnemyDefenders(player);
+      if (defenders.stream().noneMatch(Matches.unitIsNotInfrastructure())) {
+        continue;
+      }
+      final TradeTrial take = evaluateTrade(patd, patd.getUnits());
+      if (!isTrade(patd, take)) {
+        continue;
+      }
+      final Strafe strafe = bestStrafe(patd, take);
+      ProLogger.debug(
+          "STRAFE_CANT_HOLD: "
+              + t.getName()
+              + " take value="
+              + take.value()
+              + ", best strafe value="
+              + strafe.value()
+              + " in "
+              + strafe.rounds()
+              + " rounds");
+      if (strafe.beats(take) && proData.isPatchOn(ProAiPatch.STRAFE_CANT_HOLD)) {
+        strafes.put(t.getName(), strafe.rounds());
+      }
+    }
+    return strafes;
+  }
+
+  /** STRAFE_CANT_HOLD: the best number of rounds to fight before retreating, and its value. */
+  private record Strafe(int rounds, double value) {
+    boolean beats(final TradeTrial take) {
+      return rounds > 0 && value > Math.max(0, take.value()) + STRAFE_MARGIN;
+    }
+  }
+
+  /**
+   * The best strafe of a trade's attackers: 1 to {@link #STRAFE_MAX_ROUNDS} rounds, valued by the
+   * TUV swing until the retreat; a strafe that wins outright first also takes the territory and
+   * leaves its units to the counter-attack, as in {@code take}.
+   */
+  private Strafe bestStrafe(final ProTerritory patd, final TradeTrial take) {
+    final Territory t = patd.getTerritory();
+    final double takenWorth =
+        tradedTerritoryWorth(t)
+            - (take.counter() == null
+                ? 0
+                : TRADE_COUNTER_WEIGHT * Math.max(0, take.counter().getTuvSwing()));
+    int bestRounds = 0;
+    double bestValue = 0;
+    for (int rounds = 1; rounds <= STRAFE_MAX_ROUNDS; rounds++) {
+      final ProBattleResult strafe =
+          calc.callBattleCalcRetreatAfterRound(
+              proData, t, take.attackers(), patd.getMaxEnemyDefenders(player), List.of(), rounds);
+      final double value = strafe.getTuvSwing() + strafe.getWinPercentage() / 100 * takenWorth;
+      if (value > bestValue) {
+        bestValue = value;
+        bestRounds = rounds;
+      }
+    }
+    return new Strafe(bestRounds, bestValue);
+  }
+
+  /** STRAFE_CANT_HOLD: a trial attack, its battle result and its value as a trade. */
+  private record TradeTrial(
+      List<Unit> attackers,
+      ProBattleResult result,
+      @Nullable ProBattleResult counter,
+      double value) {}
+
+  private TradeTrial evaluateTrade(final ProTerritory patd, final List<Unit> attackers) {
+    final ProBattleResult result =
+        calc.estimateAttackBattleResults(
+            proData,
+            patd.getTerritory(),
+            attackers,
+            patd.getMaxEnemyDefenders(player),
+            patd.getBombardTerritoryMap().keySet());
+    final List<Unit> leftThere =
+        CollectionUtils.getMatches(result.getAverageAttackersRemaining(), Matches.unitIsNotAir());
+    final ProBattleResult counter =
+        leftThere.isEmpty()
+            ? null
+            : calc.calculateBattleResults(
+                proData,
+                patd.getTerritory(),
+                patd.getMaxEnemyUnits(),
+                leftThere,
+                patd.getMaxEnemyBombardUnits());
+    return new TradeTrial(
+        List.copyOf(attackers), result, counter, tradeValue(patd, result, counter));
+  }
+
+  /**
+   * Whether a trial capture is a trade: the enemy's counter-attack on the land units the attack is
+   * expected to leave there (not every unit that could attack, as stock's canHold) retakes it.
+   */
+  private boolean isTrade(final ProTerritory patd, final TradeTrial trial) {
+    return trial.counter() != null
+        && !canHoldAgainstCounterAttack(patd.getTerritory(), trial.counter());
+  }
+
+  /**
+   * A can't-hold trade's value: the battle's TUV swing plus the territory's worth times win%, minus
+   * {@link #TRADE_COUNTER_WEIGHT} times the enemy's counter-attack TUV swing against the land units
+   * left there.
+   */
+  private double tradeValue(
+      final ProTerritory patd,
+      final ProBattleResult result,
+      @Nullable final ProBattleResult counter) {
+    final double counterSwing =
+        counter == null ? 0 : TRADE_COUNTER_WEIGHT * Math.max(0, counter.getTuvSwing());
+    return result.getTuvSwing()
+        + tradedTerritoryWorth(patd.getTerritory()) * result.getWinPercentage() / 100
+        - counterSwing;
+  }
+
+  /** What a capture I can't hold is worth: stock's attack value for a land capture not held. */
+  private double tradedTerritoryWorth(final Territory t) {
+    final int isFactory = ProMatches.territoryHasInfraFactoryAndIsLand().test(t) ? 1 : 0;
+    final double capitalValue =
+        TerritoryAttachment.get(t).filter(TerritoryAttachment::isCapital).isPresent()
+            ? ProUtils.getPlayerProduction(t.getOwner(), data)
+            : 0;
+    return (2 + isFactory) * TerritoryAttachment.getProduction(t) + capitalValue;
   }
 
   private void determineTerritoriesThatCanBeBombed(
