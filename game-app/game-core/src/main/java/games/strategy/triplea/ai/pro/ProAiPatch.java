@@ -222,6 +222,14 @@ public enum ProAiPatch {
    * freed or placed.
    */
   SEA_BLOCKER,
+  /**
+   * Combat move sends a bomber to raid an enemy factory without AA (no risk to the bomber) instead
+   * of joining a land attack that still wins without it, and considers every unused bomber for a
+   * raid. Stock assigns bombers to attacks before it looks at raids, and its raid loop stops at the
+   * first bomber that is already attacking, so other free bombers never raid. Counts a hit per
+   * bomber moved to a raid.
+   */
+  SBR_WHEN_FREE,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

@@ -1565,7 +1565,8 @@ public class ProCombatMoveAi {
     for (final Map.Entry<Unit, Set<Territory>> bomberEntry :
         territoryManager.getAttackOptions().getBomberMoveMap().entrySet()) {
       final Unit bomber = bomberEntry.getKey();
-      if (alreadyAttackedWithUnits.contains(bomber)) {
+      final boolean sbrWhenFree = proData.hasPatch(ProAiPatch.SBR_WHEN_FREE);
+      if (alreadyAttackedWithUnits.contains(bomber) && !sbrWhenFree) {
         return; // already attacked bombers cannot move
       }
       Collection<Territory> bomberTargetTerritories = bomberEntry.getValue();
@@ -1577,6 +1578,10 @@ public class ProCombatMoveAi {
                 terr ->
                     !AirBattle.territoryCouldPossiblyHaveAirBattleDefenders(
                         terr, player, data, true));
+      }
+      if (alreadyAttackedWithUnits.contains(bomber)) {
+        moveBomberFromSurplusAttackToFreeRaid(attackMap, bomberTargetTerritories, bomber);
+        continue;
       }
       determineBestBombingAttackForBomber(
           attackMap, sortedUnitAttackOptions, bomberTargetTerritories, bomber);
@@ -1734,6 +1739,94 @@ public class ProCombatMoveAi {
       }
     }
     return Optional.empty();
+  }
+
+  /**
+   * SBR_WHEN_FREE: moves {@code bomber} out of the land attack it was assigned to and onto an enemy
+   * factory without AA when the attack still wins without it and loses less TUV swing than the
+   * raid's expected damage.
+   */
+  private void moveBomberFromSurplusAttackToFreeRaid(
+      final Map<Territory, ProTerritory> attackMap,
+      final Collection<Territory> bomberTargetTerritories,
+      final Unit bomber) {
+    final ProTerritory from =
+        attackMap.values().stream()
+            .filter(patd -> patd.getUnits().contains(bomber))
+            .findAny()
+            .orElse(null);
+    if (from == null) {
+      return;
+    }
+    final Predicate<Unit> bombingTargetMatch =
+        Matches.unitCanProduceUnitsAndCanBeDamaged()
+            .and(Matches.unitIsLegalBombingTargetBy(bomber));
+    Territory raidTerritory = null;
+    int maxDamage = 1;
+    for (final Territory t : bomberTargetTerritories) {
+      if (t.getUnits().stream().noneMatch(bombingTargetMatch)
+          || t.anyUnitsMatch(Matches.unitIsAaForBombingThisUnitOnly())
+          || !canAirSafelyLandAfterAttack(bomber, t)) {
+        continue;
+      }
+      // a raid does at most the territory's production; assume 3 per bomber already raiding it
+      final int damage =
+          Math.min(
+              3, TerritoryAttachment.getProduction(t) - 3 * attackMap.get(t).getBombers().size());
+      if (damage > maxDamage) {
+        maxDamage = damage;
+        raidTerritory = t;
+      }
+    }
+    if (raidTerritory == null) {
+      ProLogger.trace(
+          "SBR_WHEN_FREE: no free raid target for " + bomber + " in " + from.getTerritory());
+      return;
+    }
+    final List<Unit> withoutBomber = new ArrayList<>(from.getUnits());
+    withoutBomber.remove(bomber);
+    final Territory t = from.getTerritory();
+    final List<Unit> defenders = from.getMaxEnemyDefenders(player);
+    final ProBattleResult with =
+        calc.estimateAttackBattleResults(
+            proData, t, from.getUnits(), defenders, from.getBombardTerritoryMap().keySet());
+    final ProBattleResult without =
+        calc.estimateAttackBattleResults(
+            proData, t, withoutBomber, defenders, from.getBombardTerritoryMap().keySet());
+    final boolean stillWins =
+        without.getWinPercentage() >= proData.getWinPercentage()
+            || without.getWinPercentage() >= with.getWinPercentage() - 1;
+    if (!stillWins
+        || (with.isHasLandUnitRemaining() && !without.isHasLandUnitRemaining())
+        || without.getTuvSwing() < with.getTuvSwing() - maxDamage) {
+      ProLogger.trace(
+          "SBR_WHEN_FREE: keep bomber in attack on "
+              + t
+              + ", win% "
+              + with.getWinPercentage()
+              + " -> "
+              + without.getWinPercentage()
+              + ", swing "
+              + with.getTuvSwing()
+              + " -> "
+              + without.getTuvSwing());
+      return;
+    }
+    from.getUnits().remove(bomber);
+    from.setBattleResult(null);
+    attackMap.get(raidTerritory).getBombers().add(bomber);
+    proData.countPatchHit(ProAiPatch.SBR_WHEN_FREE);
+    ProLogger.debug(
+        "SBR_WHEN_FREE: bomber ("
+            + bomber
+            + ") from attack on "
+            + t
+            + " to raid "
+            + raidTerritory
+            + ", win% "
+            + with.getWinPercentage()
+            + " -> "
+            + without.getWinPercentage());
   }
 
   /**
