@@ -109,6 +109,19 @@ public final class ProTerritoryValueUtils {
       final GamePlayer player,
       final List<Territory> territoriesThatCantBeHeld,
       final List<Territory> territoriesToCheck) {
+    return findSeaTerritoryValues(player, territoriesThatCantBeHeld, territoriesToCheck, false);
+  }
+
+  /**
+   * Like {@link #findSeaTerritoryValues(GamePlayer, List, List)}; with {@code fixed} (SEA_VALUE_FIX)
+   * the nearby convoy production and enemy unit terms are kept. Stock discards both sums, so every
+   * sea zone is worth 0.
+   */
+  public static Map<Territory, Double> findSeaTerritoryValues(
+      final GamePlayer player,
+      final List<Territory> territoriesThatCantBeHeld,
+      final List<Territory> territoriesToCheck,
+      final boolean fixed) {
 
     // Determine value for water territories
     final Map<Territory, Double> territoryValueMap = new HashMap<>();
@@ -126,21 +139,34 @@ public final class ProTerritoryValueUtils {
             CollectionUtils.getMatches(
                 nearbySeaTerritories,
                 ProMatches.territoryIsEnemyOrCantBeHeld(player, territoriesThatCantBeHeld));
-        calculateTerritoryValueToTargets(
-            t, nearbyEnemySeaTerritories, player, data, TerritoryAttachment::getProduction);
+        final double productionValue =
+            calculateTerritoryValueToTargets(
+                t, nearbyEnemySeaTerritories, player, data, TerritoryAttachment::getProduction);
 
         // Determine sea value based on nearby enemy sea units
         double nearbyEnemySeaUnitValue = 0;
         final List<Territory> nearbyEnemySeaUnitTerritories =
             CollectionUtils.getMatches(
                 nearbySeaTerritories, Matches.territoryHasEnemyUnits(player));
-        calculateTerritoryValueToTargets(
-            t,
-            nearbyEnemySeaUnitTerritories,
-            player,
-            data,
-            targetTerritory ->
-                targetTerritory.getUnitCollection().countMatches(Matches.unitIsEnemyOf(player)));
+        final double enemyUnitValue =
+            calculateTerritoryValueToTargets(
+                t,
+                nearbyEnemySeaUnitTerritories,
+                player,
+                data,
+                targetTerritory ->
+                    targetTerritory
+                        .getUnitCollection()
+                        .countMatches(Matches.unitIsEnemyOf(player)));
+        if (fixed) {
+          // The helper adds each target's enemy unit count on top of its value: the production
+          // term carries the unit counts too, and the unit term counts them twice.
+          final double unitCounts = enemyUnitValue / 2;
+          nearbySeaProductionValue =
+              productionValue
+                  - sumUnitCountsByDistance(t, nearbyEnemySeaTerritories, player, data);
+          nearbyEnemySeaUnitValue = unitCounts;
+        }
 
         // Set final values
         final double value = 100 * nearbySeaProductionValue + nearbyEnemySeaUnitValue;
@@ -151,6 +177,14 @@ public final class ProTerritoryValueUtils {
     }
 
     return territoryValueMap;
+  }
+
+  private static double sumUnitCountsByDistance(
+      final Territory t,
+      final List<Territory> targetTerritories,
+      final GamePlayer player,
+      final GameData data) {
+    return calculateTerritoryValueToTargets(t, targetTerritories, player, data, target -> 0);
   }
 
   private static double calculateTerritoryValueToTargets(

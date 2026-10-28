@@ -270,6 +270,13 @@ public enum ProAiPatch {
    * victory city and a capital owner's income. See ProCasualtyUtils.captureValue.
    */
   CAPTURE_KEEP_LAND_WORTH,
+  /**
+   * Bug fix. Non-combat move values a sea zone by the enemy convoy production and enemy units
+   * within 4 sea moves (halved per move). A 2025 refactor (904c48e5f0) moved both sums into a
+   * helper and dropped its return values, so every sea zone is worth 0 and warships follow the
+   * transports or sit where they are. The gate keeps the sums. Counts a hit per non-combat move.
+   */
+  SEA_VALUE_FIX,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
