@@ -12,6 +12,9 @@ setup:
 format:
     ./gradlew spotlessApply
 
-# Launch the headed TripleA game client (the main app)
+# Champion 6: the patches Hard (AI) seats play with
+patches := "PURCHASE_SIM_NO_PHANTOM,PURCHASE_SIM_CONQUERED,BUY_DEFENSIVE_LAND_MIX,BUY_LESS_IDLE_NAVY,BUY_TRANSPORTS_ON_DEMAND,DAN_COOKED,NCM_DEFENSIVE_STANCE_FIX,AMPHIB_READD_DROPPED,AMPHIB_CAN_OPENER@Axis,AMPHIB_CAN_OPENER_VALUABLE@Axis"
+
+# Launch the headed TripleA game client, Hard (AI) as the champion
 run:
-    ./gradlew :game-headed:run
+    JAVA_TOOL_OPTIONS='-Dtriplea.ai.patches={{patches}}' ./gradlew :game-headed:run
