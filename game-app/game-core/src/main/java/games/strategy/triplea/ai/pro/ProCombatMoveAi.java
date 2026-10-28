@@ -18,6 +18,7 @@ import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProMoveUtils;
+import games.strategy.triplea.ai.pro.util.ProNationalObjectiveUtils;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
 import games.strategy.triplea.ai.pro.util.ProSeaBlockerUtils;
@@ -346,6 +347,8 @@ public class ProCombatMoveAi {
 
       // Determine production value and if it is an enemy capital
       ProductionAndIsCapital productionAndIsCapital = getProductionAndIsCapital(t);
+      productionAndIsCapital.production +=
+          (int) Math.round(ProNationalObjectiveUtils.value(proData, player, t));
 
       // Calculate attack value for prioritization
       double tuvSwing = patd.getMaxBattleResult().getTuvSwing();
@@ -1204,6 +1207,8 @@ public class ProCombatMoveAi {
                 patd.getMaxEnemyDefenders(player),
                 patd.getBombardTerritoryMap().keySet());
         ProductionAndIsCapital initialProductionAndIsCapital = getProductionAndIsCapital(t);
+        initialProductionAndIsCapital.production +=
+            (int) Math.round(ProNationalObjectiveUtils.value(proData, player, t));
         final double attackValue =
             result.getTuvSwing()
                 + initialProductionAndIsCapital.production

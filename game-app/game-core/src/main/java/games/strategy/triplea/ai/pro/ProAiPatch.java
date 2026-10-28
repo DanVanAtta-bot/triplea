@@ -247,6 +247,14 @@ public enum ProAiPatch {
    * units and the surplus share the slots and the overflow stays held turn after turn.
    */
   PURCHASE_HELD_UNITS,
+  /**
+   * National objectives count in territory value: a territory whose side decides whether an
+   * objective is met (mine completed or kept, the enemy's broken or denied) adds the objective's
+   * PUs to its production in the attack, defence, move and purchase-simulation values ({@link
+   * games.strategy.triplea.ai.pro.util.ProNationalObjectiveUtils}). Stock values only territory
+   * production, so a 0-PU island that completes a 5-PU objective is worth nothing.
+   */
+  NO_VALUE,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

@@ -343,7 +343,8 @@ public final class ProTerritoryValueUtils {
           data.getMap().getDistance(t, nearbyEnemyTerritory, territoryToNeighborCondition);
       if (distance > 0) {
         double value =
-            TerritoryAttachment.getProduction(nearbyEnemyTerritory)
+            (TerritoryAttachment.getProduction(nearbyEnemyTerritory)
+                    + ProNationalObjectiveUtils.value(proData, player, nearbyEnemyTerritory))
                 * ProDanModel.incomeFactor(proData, nearbyEnemyTerritory);
         if (ProUtils.isNeutralLand(nearbyEnemyTerritory)) {
           // find neutral value
@@ -435,7 +436,9 @@ public final class ProTerritoryValueUtils {
       if (distance > 0 && distance <= 3) {
         if (ProMatches.territoryIsEnemyOrCantBeHeld(player, territoriesThatCantBeHeld)
             .test(nearbyLandTerritory)) {
-          double value = TerritoryAttachment.getProduction(nearbyLandTerritory);
+          double value =
+              TerritoryAttachment.getProduction(nearbyLandTerritory)
+                  + ProNationalObjectiveUtils.value(proData, player, nearbyLandTerritory);
           if (ProUtils.isNeutralLand(nearbyLandTerritory)) {
             value = findTerritoryAttackValue(proData, player, nearbyLandTerritory);
           }

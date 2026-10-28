@@ -26,6 +26,7 @@ import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProMoveUtils;
+import games.strategy.triplea.ai.pro.util.ProNationalObjectiveUtils;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
 import games.strategy.triplea.ai.pro.util.ProSeaBlockerUtils;
@@ -372,7 +373,9 @@ class ProNonCombatMoveAi {
       if (Matches.unitIsLand().test(unit)) {
         for (final Territory t : sortedUnitMoveOptions.get(unit)) {
           final int unitValue = proData.getUnitValue(unit.getType());
-          final int production = TerritoryAttachment.getProduction(t);
+          final int production =
+              TerritoryAttachment.getProduction(t)
+                  + (int) Math.round(ProNationalObjectiveUtils.value(proData, player, t));
 
           // Only defend territories that either already have units (avoid abandoning territories)
           // or where unit value is less than production + 3 (avoid sacrificing expensive units to
@@ -620,6 +623,8 @@ class ProNonCombatMoveAi {
       if (t.equals(proData.getMyCapital())) {
         productionAndIsEnemyOrAlliedCapital.production = 0;
       }
+      productionAndIsEnemyOrAlliedCapital.production +=
+          (int) Math.round(ProNationalObjectiveUtils.value(proData, player, t));
 
       // Determine neighbor value
       double neighborValue = 0;
