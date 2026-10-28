@@ -203,6 +203,14 @@ public enum ProAiPatch {
    * long-run territory value, so a bid rarely changes a round-1 battle. Leftover PUs go to stock.
    */
   BID_PLACE_FOR_R1,
+  /**
+   * Bug fix. Sea-zone defence purchases start from the free deck on own carriers already in the
+   * zone (own carrier capacity minus own carrier-landing air, as the place delegate counts it).
+   * Stock starts from {@code Math.min(0, unusedCarrierCapacity)}, so free deck counts only after a
+   * carrier is bought in the same loop and the AI never buys fighters for an existing carrier.
+   * Counts a hit per sea zone whose starting free deck it raises above 0.
+   */
+  PURCHASE_CARRIER_DECK_FIX,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
