@@ -167,6 +167,18 @@ class ProPurchaseAi {
    */
   Map<Territory, ProPurchaseTerritory> bid(
       final int pus, final IPurchaseDelegate purchaseDelegate, final GameState startOfTurnData) {
+    return bid(pus, purchaseDelegate, startOfTurnData, List.of());
+  }
+
+  /**
+   * Like {@link #bid(int, IPurchaseDelegate, GameState)}, buying {@code preset} first (from {@link
+   * ProBidPlanner}); the stock logic spends what's left.
+   */
+  Map<Territory, ProPurchaseTerritory> bid(
+      final int pus,
+      final IPurchaseDelegate purchaseDelegate,
+      final GameState startOfTurnData,
+      final List<ProBidPlanner.Placement> preset) {
     // Current data fields
     setGameDataAndPlayerFromProData();
     this.startOfTurnData = startOfTurnData;
@@ -183,6 +195,21 @@ class ProPurchaseAi {
     // Find all purchase/place territories
     final Map<Territory, ProPurchaseTerritory> purchaseTerritories =
         ProPurchaseUtils.findBidTerritories(proData, player);
+    for (final ProBidPlanner.Placement p : preset) {
+      final ProPurchaseTerritory ppt = purchaseTerritories.get(p.territory());
+      final ProPurchaseOption option =
+          purchaseOptions.getAllOptions().stream()
+              .filter(o -> o.getUnitType().equals(p.unitType()) && o.getQuantity() == 1)
+              .findFirst()
+              .orElse(null);
+      if (ppt == null || option == null || !resourceTracker.hasEnough(option)) {
+        ProLogger.warn("Bid R1: can't buy " + p);
+        continue;
+      }
+      resourceTracker.purchase(option);
+      addUnitsToPlace(ppt.getCanPlaceTerritories().getFirst(), option.createTempUnits());
+      ppt.setUnitProduction(ppt.getUnitProduction() + 1);
+    }
 
     int previousNumUnits = 0;
     while (true) {

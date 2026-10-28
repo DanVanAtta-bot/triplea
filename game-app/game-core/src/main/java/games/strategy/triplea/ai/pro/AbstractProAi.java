@@ -196,7 +196,14 @@ public abstract class AbstractProAi extends AbstractAi {
     }
     if (purchaseForBid) {
       prepareData(data);
-      storedPurchaseTerritories = purchaseAi.bid(pusToSpend, purchaseDelegate, data);
+      List<ProBidPlanner.Placement> bidPlan = List.of();
+      if (proData.isPatchOn(ProAiPatch.BID_PLACE_FOR_R1)) {
+        bidPlan =
+            new ProBidPlanner(this, proData, calc, combatMoveAi).plan(data, player, pusToSpend);
+        initializeData();
+        prepareData(data);
+      }
+      storedPurchaseTerritories = purchaseAi.bid(pusToSpend, purchaseDelegate, data, bidPlan);
     } else {
       // Repair factories
       purchaseAi.repair(pusToSpend, purchaseDelegate, data, player);
@@ -290,6 +297,11 @@ public abstract class AbstractProAi extends AbstractAi {
       }
     }
     ProLogger.info(player.getName() + " time for purchase=" + (System.currentTimeMillis() - start));
+  }
+
+  @Nullable
+  GameData copyDataForBid(final GameData data) {
+    return copyData(data);
   }
 
   private GameData copyData(GameData data) {

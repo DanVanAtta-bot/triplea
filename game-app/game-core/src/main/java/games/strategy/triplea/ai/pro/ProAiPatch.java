@@ -196,6 +196,13 @@ public enum ProAiPatch {
    * landing uses them. Needs AMPHIB_CAN_OPENER on.
    */
   AMPHIB_CAN_OPENER_VALUABLE,
+  /**
+   * Spends a bid on units that change this player's first-round battles (see {@link
+   * ProBidPlanner}): next to a target the combat move would attack, or could attack with them, and
+   * in own territories an earlier-moving enemy threatens. Stock spreads one unit per territory by
+   * long-run territory value, so a bid rarely changes a round-1 battle. Leftover PUs go to stock.
+   */
+  BID_PLACE_FOR_R1,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
