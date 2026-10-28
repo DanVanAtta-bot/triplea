@@ -10,6 +10,7 @@ import games.strategy.engine.data.Unit;
 import games.strategy.engine.delegate.IDelegateBridge;
 import games.strategy.engine.framework.GameDataManager;
 import games.strategy.engine.framework.GameDataUtils;
+import games.strategy.triplea.Constants;
 import games.strategy.triplea.Properties;
 import games.strategy.triplea.ai.AbstractAi;
 import games.strategy.triplea.ai.pro.data.ProBattleResult;
@@ -26,7 +27,9 @@ import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
 import games.strategy.triplea.ai.pro.util.ProTransportUtils;
+import games.strategy.triplea.ai.pro.util.ProUtils;
 import games.strategy.triplea.attachments.PoliticalActionAttachment;
+import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.DiceRoll;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.delegate.PoliticsDelegate;
@@ -45,6 +48,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +82,8 @@ public abstract class AbstractProAi extends AbstractAi {
   private List<Territory> storedStrafingTerritories;
   // STRAFE_CANT_HOLD: territory name -> rounds to fight before retreating
   private Map<String, Integer> storedStrafeRetreats = Map.of();
+  // CAPTURE_KEEP_LAND_WORTH: the combat move plan's can-hold verdict per attacked territory name.
+  private Map<String, Boolean> plannedCanHold = Map.of();
 
   // Measurement only; never consulted by decision logic.
   @Getter @Setter @Nullable private ProDecisionListener decisionListener;
@@ -160,7 +166,7 @@ public abstract class AbstractProAi extends AbstractAi {
       didNonCombatMove = true;
     } else {
       if (storedCombatMoveMap == null) {
-        combatMoveAi.doCombatMove(moveDel);
+        rememberCanHold(combatMoveAi.doCombatMove(moveDel));
       } else {
         combatMoveAi.doMove(storedCombatMoveMap, moveDel, data, player);
         storedCombatMoveMap = null;
@@ -262,6 +268,8 @@ public abstract class AbstractProAi extends AbstractAi {
           proData.initializeSimulation(this, dataCopy, playerCopy);
           final Map<Territory, ProTerritory> moveMap = combatMoveAi.doCombatMove(moveDel);
           if (storedCombatMoveMap == null) {
+            // transferMoveMap drops canHold, so keep the plan's verdicts by territory name.
+            rememberCanHold(moveMap);
             storedCombatMoveMap =
                 ProSimulateTurnUtils.transferMoveMap(proData, moveMap, data, player);
           }
@@ -551,6 +559,12 @@ public abstract class AbstractProAi extends AbstractAi {
     return myCasualties;
   }
 
+  private void rememberCanHold(final Map<Territory, ProTerritory> plan) {
+    final Map<String, Boolean> canHold = new HashMap<>();
+    plan.forEach((t, patd) -> canHold.put(t.getName(), patd.isCanHold()));
+    plannedCanHold = canHold;
+  }
+
   /** CAPTURE_KEEP_LAND: see {@link ProAiPatch#CAPTURE_KEEP_LAND}. */
   private List<Unit> keepLandToCapture(
       final List<Unit> killed,
@@ -591,6 +605,23 @@ public abstract class AbstractProAi extends AbstractAi {
     if (swap.isEmpty()) {
       return killed;
     }
+    if (proData.hasPatch(ProAiPatch.CAPTURE_KEEP_LAND_WORTH)) {
+      final double captureValue = captureValue(battleSite);
+      final double extraCost =
+          ProPurchaseUtils.getCost(proData, swap.get().airToLose())
+              - ProPurchaseUtils.getCost(proData, swap.get().landToKeep());
+      ProLogger.debug(
+          player.getName()
+              + " keep-land worth at "
+              + battleSite.getName()
+              + ": capture value="
+              + captureValue
+              + ", extra cost="
+              + extraCost);
+      if (captureValue <= extraCost && proData.isPatchOn(ProAiPatch.CAPTURE_KEEP_LAND_WORTH)) {
+        return killed;
+      }
+    }
     final List<Unit> withLand = new ArrayList<>(attackersAlive);
     withLand.removeAll(swap.get().apply(killed));
     final Collection<Unit> defenders =
@@ -615,6 +646,35 @@ public abstract class AbstractProAi extends AbstractAi {
       return killed;
     }
     return swap.get().apply(killed);
+  }
+
+  /** CAPTURE_KEEP_LAND_WORTH: what taking {@code site} is worth in PUs to this player. */
+  private double captureValue(final Territory site) {
+    final Optional<TerritoryAttachment> ta = TerritoryAttachment.get(site);
+    if (ta.isEmpty()) {
+      return 0;
+    }
+    final GamePlayer owner = site.getOwner();
+    double ownerIncome = 0;
+    for (final Territory t : getGameData().getMap().getTerritoriesOwnedBy(owner)) {
+      ownerIncome += TerritoryAttachment.get(t).map(TerritoryAttachment::getProduction).orElse(0);
+    }
+    boolean ownerAllyMovesFirst = false;
+    for (final GamePlayer p : ProUtils.getOtherPlayersInTurnOrder(getGamePlayer())) {
+      if (p.equals(owner)) {
+        break;
+      }
+      ownerAllyMovesFirst |= getGameData().getRelationshipTracker().isAllied(p, owner);
+    }
+    return ProCasualtyUtils.captureValue(
+        ta.get().getProduction(),
+        ProMatches.territoryHasInfraFactoryAndIsLand().test(site),
+        ta.get().getVictoryCity() > 0,
+        ta.get().getCapital().filter(owner.getName()::equals).isPresent(),
+        owner.getResources().getQuantity(Constants.PUS),
+        ownerIncome,
+        plannedCanHold.getOrDefault(site.getName(), false),
+        ownerAllyMovesFirst);
   }
 
   @Override

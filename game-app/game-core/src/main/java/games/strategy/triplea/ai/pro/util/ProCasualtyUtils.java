@@ -14,6 +14,44 @@ import lombok.experimental.UtilityClass;
 @UtilityClass
 public class ProCasualtyUtils {
 
+  /**
+   * Chance that a captured territory is still mine after the enemy's next turn, by the combat
+   * plan's can-hold verdict. Measured in champion-6 LHTR games: 27% of can-hold captures and 79% of
+   * can't-hold ones were retaken by the next round.
+   */
+  static final double HOLD_CHANCE_CAN_HOLD = 0.75;
+
+  static final double HOLD_CHANCE_TRADE = 0.2;
+  static final double VICTORY_CITY_VALUE = 5;
+
+  /**
+   * What capturing a land territory is worth in PUs to the captor. Certain even if it's retaken:
+   * its production (collected once) and a capital's treasury (taken at once, so the owner also
+   * can't buy with it). A factory denies the owner its next placement there, worth up to its
+   * production, unless an ally of the owner moving first can retake it, so then weighted by the
+   * chance of holding it. Weighted by that chance too: a turn of the territory's income denied to
+   * the owner, a victory city, and a capital owner's whole income.
+   *
+   * @param ownerIncome the owner's total production, which caps what it buys at the factory
+   * @param ownerAllyMovesFirst whether an ally of the owner moves before the owner's next turn
+   */
+  public static double captureValue(
+      final int production,
+      final boolean factory,
+      final boolean victoryCity,
+      final boolean capital,
+      final double treasury,
+      final double ownerIncome,
+      final boolean canHold,
+      final boolean ownerAllyMovesFirst) {
+    final double hold = canHold ? HOLD_CHANCE_CAN_HOLD : HOLD_CHANCE_TRADE;
+    final double placementDenied =
+        factory ? Math.min(production, ownerIncome) * (ownerAllyMovesFirst ? hold : 1) : 0;
+    final double held =
+        production + (victoryCity ? VICTORY_CITY_VALUE : 0) + (capital ? ownerIncome : 0);
+    return production + (capital ? treasury : 0) + placementDenied + hold * held;
+  }
+
   /** Keep {@code landToKeep} alive by losing {@code airToLose} instead. */
   public record KeepLandSwap(Unit landToKeep, Unit airToLose) {
     public List<Unit> apply(final Collection<Unit> killed) {

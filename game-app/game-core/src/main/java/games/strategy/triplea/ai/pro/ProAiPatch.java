@@ -262,6 +262,14 @@ public enum ProAiPatch {
    * cheapest casualties first, so a battle won with only air left captures nothing.
    */
   CAPTURE_KEEP_LAND,
+  /**
+   * With CAPTURE_KEEP_LAND: swap only when the capture is worth more than the swap's extra cost
+   * (air unit cost minus land unit cost). Worth: production, a capital's treasury, a factory's
+   * denied placement (weighted by the chance of holding it if an ally of the owner moves first),
+   * and, weighted by that chance (the combat plan's can-hold verdict), a turn of income denied, a
+   * victory city and a capital owner's income. See ProCasualtyUtils.captureValue.
+   */
+  CAPTURE_KEEP_LAND_WORTH,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */
