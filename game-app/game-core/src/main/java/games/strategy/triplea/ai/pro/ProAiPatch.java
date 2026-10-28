@@ -241,6 +241,12 @@ public enum ProAiPatch {
    * Germany into Karelia next to the Archangel stack).
    */
   STRAFE_CANT_HOLD,
+  /**
+   * The purchase leaves production slots for units still held from earlier turns, on maps where
+   * unplaced units live (eg v3, Global 1940). Stock ignores them and buys a full load, so the held
+   * units and the surplus share the slots and the overflow stays held turn after turn.
+   */
+  PURCHASE_HELD_UNITS,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

@@ -329,6 +329,7 @@ class ProPurchaseAi {
     // Find all purchase/place territories
     final Map<Territory, ProPurchaseTerritory> purchaseTerritories =
         ProPurchaseUtils.findPurchaseTerritories(proData, player);
+    reserveProductionForHeldUnits(purchaseTerritories);
     final Set<Territory> placeTerritories =
         new HashSet<>(
             CollectionUtils.getMatches(
@@ -446,6 +447,49 @@ class ProPurchaseAi {
 
     territoryManager = null;
     return purchaseTerritories;
+  }
+
+  /**
+   * PURCHASE_HELD_UNITS: units still held from earlier turns (maps where unplaced units live) take
+   * production slots at Place, so take those slots out of the purchase plan, largest factories
+   * first. Land and air units use land factories; sea units use factories with a sea zone.
+   */
+  private void reserveProductionForHeldUnits(
+      final Map<Territory, ProPurchaseTerritory> purchaseTerritories) {
+    final List<Unit> held = player.getMatches(Matches.unitIsNotConstruction());
+    if (held.isEmpty()) {
+      return;
+    }
+    final int sea = CollectionUtils.countMatches(held, Matches.unitIsSea());
+    final List<ProPurchaseTerritory> byProduction = new ArrayList<>(purchaseTerritories.values());
+    byProduction.sort(Comparator.comparingInt(ProPurchaseTerritory::getUnitProduction).reversed());
+    final List<ProPurchaseTerritory> seaFactories =
+        CollectionUtils.getMatches(
+            byProduction,
+            ppt -> ppt.getCanPlaceTerritories().stream().anyMatch(p -> p.getTerritory().isWater()));
+    final Map<ProPurchaseTerritory, Integer> reserve = new HashMap<>();
+    reserveSlots(seaFactories, sea, reserve);
+    reserveSlots(byProduction, held.size() - sea, reserve);
+    if (reserve.isEmpty() || !proData.isPatchOn(ProAiPatch.PURCHASE_HELD_UNITS)) {
+      return;
+    }
+    reserve.forEach((ppt, n) -> ppt.setUnitProduction(ppt.getUnitProduction() - n));
+    ProLogger.info("Reserved production for held units " + held + ": " + reserve);
+  }
+
+  private static void reserveSlots(
+      final List<ProPurchaseTerritory> factories,
+      final int units,
+      final Map<ProPurchaseTerritory, Integer> reserve) {
+    int left = units;
+    for (final ProPurchaseTerritory ppt : factories) {
+      final int free = ppt.getUnitProduction() - reserve.getOrDefault(ppt, 0);
+      final int n = Math.min(left, Math.max(0, free));
+      if (n > 0) {
+        reserve.merge(ppt, n, Integer::sum);
+        left -= n;
+      }
+    }
   }
 
   /**
