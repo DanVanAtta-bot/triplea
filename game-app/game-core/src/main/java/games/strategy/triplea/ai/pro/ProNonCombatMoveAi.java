@@ -2725,8 +2725,9 @@ class ProNonCombatMoveAi {
    * CAPITAL_ENOUGH: of the land units the best-value move sends to (or keeps in) my capital, keeps
    * only as many as the capital needs to hold against the enemies' max attack (attacker win% at
    * most {@link #CAPITAL_ENOUGH_MAX_ENEMY_WIN} and no TUV gain for the attacker), cheapest defence
-   * first, and sends the rest to their best-value holdable territory other than the capital.
-   * Changes nothing when the capital can't hold even with all of them.
+   * first, and sends the rest to their best-value holdable territory other than the capital that is
+   * no farther from enemy land than the capital (else they stay with the capital). Changes nothing
+   * when the capital can't hold even with all of them.
    */
   private void releaseCapitalExcess(
       final Map<Territory, ProTerritory> moveMap, final Map<Unit, Set<Territory>> options) {
@@ -2762,15 +2763,26 @@ class ProNonCombatMoveAi {
         lo = mid + 1;
       }
     }
+    // Released units go front-ward: no farther from enemy land than the capital
+    final int capitalEnemyDistance =
+        ProUtils.getClosestEnemyLandTerritoryDistance(data, player, capital);
+    final Map<Territory, Integer> enemyDistance = new HashMap<>();
     for (final Unit u : candidates.subList(lo, candidates.size())) {
       Territory best = null;
       double bestValue = 0;
       for (final Territory t : options.get(u)) {
         final ProTerritory to = moveMap.get(t);
-        if (!t.equals(capital) && to != null && to.isCanHold() && to.getValue() > bestValue) {
-          best = t;
-          bestValue = to.getValue();
+        if (t.equals(capital) || to == null || !to.isCanHold() || to.getValue() <= bestValue) {
+          continue;
         }
+        final int distance =
+            enemyDistance.computeIfAbsent(
+                t, x -> ProUtils.getClosestEnemyLandTerritoryDistance(data, player, x));
+        if (distance < 0 || (capitalEnemyDistance >= 0 && distance > capitalEnemyDistance)) {
+          continue;
+        }
+        best = t;
+        bestValue = to.getValue();
       }
       if (best == null) {
         continue;
