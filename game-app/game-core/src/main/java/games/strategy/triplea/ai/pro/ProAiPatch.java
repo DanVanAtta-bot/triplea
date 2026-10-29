@@ -259,10 +259,10 @@ public enum ProAiPatch {
    * Non-combat move keeps only as many of the land units it sends to (or keeps in) my capital for
    * their value as the capital needs to hold against the enemies' max next-turn attack (enemy win
    * at most 5%, no TUV gain), cheapest defence per PU first, and sends the rest to their best-value
-   * holdable territory no farther from enemy land than the capital instead. Stock sends every
-   * leftover land unit to the highest-value holdable territory, which is usually the capital, so it
-   * ends far above what it needs (champion-7 self-play: Moscow at a median 2.4x the German strength
-   * in reach). Counts a hit per released unit.
+   * holdable territory instead. Stock sends every leftover land unit to the highest-value holdable
+   * territory, which is usually the capital, so it ends far above what it needs (champion-7
+   * self-play: Moscow at a median 2.4x the German strength in reach). Counts a hit per released
+   * unit.
    */
   CAPITAL_ENOUGH,
   /**
@@ -273,6 +273,16 @@ public enum ProAiPatch {
    * a hit per kept attack.
    */
   CAPITAL_ENOUGH_TRADE,
+  /**
+   * Narrows {@link #CAPITAL_ENOUGH}'s destinations to territories no farther from enemy land than
+   * the capital. Needs CAPITAL_ENOUGH on.
+   */
+  CAPITAL_ENOUGH_FRONT,
+  /**
+   * Narrows {@link #CAPITAL_ENOUGH}'s destinations to the capital's neighbours, so released units
+   * can step back in next turn. Needs CAPITAL_ENOUGH on.
+   */
+  CAPITAL_ENOUGH_NEAR,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

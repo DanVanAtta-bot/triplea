@@ -2763,9 +2763,13 @@ class ProNonCombatMoveAi {
         lo = mid + 1;
       }
     }
-    // Released units go front-ward: no farther from enemy land than the capital
+    // Destinations: CAPITAL_ENOUGH_FRONT no farther from enemy land than the capital,
+    // CAPITAL_ENOUGH_NEAR next to the capital; else any holdable territory
+    final boolean front = proData.hasPatch(ProAiPatch.CAPITAL_ENOUGH_FRONT);
+    final boolean near = proData.hasPatch(ProAiPatch.CAPITAL_ENOUGH_NEAR);
     final int capitalEnemyDistance =
-        ProUtils.getClosestEnemyLandTerritoryDistance(data, player, capital);
+        front ? ProUtils.getClosestEnemyLandTerritoryDistance(data, player, capital) : -1;
+    final Set<Territory> capitalNeighbors = data.getMap().getNeighbors(capital);
     final Map<Territory, Integer> enemyDistance = new HashMap<>();
     for (final Unit u : candidates.subList(lo, candidates.size())) {
       Territory best = null;
@@ -2775,11 +2779,16 @@ class ProNonCombatMoveAi {
         if (t.equals(capital) || to == null || !to.isCanHold() || to.getValue() <= bestValue) {
           continue;
         }
-        final int distance =
-            enemyDistance.computeIfAbsent(
-                t, x -> ProUtils.getClosestEnemyLandTerritoryDistance(data, player, x));
-        if (distance < 0 || (capitalEnemyDistance >= 0 && distance > capitalEnemyDistance)) {
+        if (near && !capitalNeighbors.contains(t)) {
           continue;
+        }
+        if (front) {
+          final int distance =
+              enemyDistance.computeIfAbsent(
+                  t, x -> ProUtils.getClosestEnemyLandTerritoryDistance(data, player, x));
+          if (distance < 0 || (capitalEnemyDistance >= 0 && distance > capitalEnemyDistance)) {
+            continue;
+          }
         }
         best = t;
         bestValue = to.getValue();
