@@ -283,6 +283,11 @@ public enum ProAiPatch {
    * can step back in next turn. Needs CAPITAL_ENOUGH on.
    */
   CAPITAL_ENOUGH_NEAR,
+  /**
+   * {@link #CAPITAL_ENOUGH} and {@link #CAPITAL_ENOUGH_TRADE} hold the capital to an enemy win
+   * below 10% (Dan's garrison rule) instead of 5%.
+   */
+  CAPITAL_ENOUGH_10,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

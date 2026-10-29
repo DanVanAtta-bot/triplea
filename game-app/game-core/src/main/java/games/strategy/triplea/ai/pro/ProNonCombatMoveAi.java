@@ -2721,6 +2721,11 @@ class ProNonCombatMoveAi {
   /** CAPITAL_ENOUGH: attacker win% the capital's defence must stay at or below after a release. */
   static final double CAPITAL_ENOUGH_MAX_ENEMY_WIN = 5;
 
+  /** CAPITAL_ENOUGH_10: Dan's garrison rule, the enemy below 10% on the capital. */
+  static double capitalEnoughMaxEnemyWin(final ProData proData) {
+    return proData.hasPatch(ProAiPatch.CAPITAL_ENOUGH_10) ? 10 : CAPITAL_ENOUGH_MAX_ENEMY_WIN;
+  }
+
   /**
    * CAPITAL_ENOUGH: of the land units the best-value move sends to (or keeps in) my capital, keeps
    * only as many as the capital needs to hold against the enemies' max attack (attacker win% at
@@ -2826,6 +2831,7 @@ class ProNonCombatMoveAi {
     final List<Unit> defenders = new ArrayList<>(base);
     defenders.addAll(candidates.subList(0, keep));
     final ProBattleResult result = calc.calculateBattleResults(proData, capital, defenders);
-    return result.getWinPercentage() <= CAPITAL_ENOUGH_MAX_ENEMY_WIN && result.getTuvSwing() <= 0;
+    return result.getWinPercentage() <= capitalEnoughMaxEnemyWin(proData)
+        && result.getTuvSwing() <= 0;
   }
 }

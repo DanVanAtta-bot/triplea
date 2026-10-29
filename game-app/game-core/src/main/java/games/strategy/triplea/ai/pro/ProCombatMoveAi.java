@@ -2777,7 +2777,7 @@ public class ProCombatMoveAi {
               enemyAttackingUnits,
               defenders,
               enemyAttackOptions.getMax(myCapital).getMaxBombardUnits());
-      if (result.getWinPercentage() <= ProNonCombatMoveAi.CAPITAL_ENOUGH_MAX_ENEMY_WIN
+      if (result.getWinPercentage() <= ProNonCombatMoveAi.capitalEnoughMaxEnemyWin(proData)
           && result.getTuvSwing() <= 0) {
         for (final ProTerritory p : extras) {
           proData.countPatchHit(ProAiPatch.CAPITAL_ENOUGH_TRADE);
