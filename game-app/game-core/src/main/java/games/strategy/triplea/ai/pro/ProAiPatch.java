@@ -255,6 +255,24 @@ public enum ProAiPatch {
    * production, so a 0-PU island that completes a 5-PU objective is worth nothing.
    */
   NO_VALUE,
+  /**
+   * Non-combat move keeps only as many of the land units it sends to (or keeps in) my capital for
+   * their value as the capital needs to hold against the enemies' max next-turn attack (enemy win
+   * at most 5%, no TUV gain), cheapest defence per PU first, and sends the rest to their best-value
+   * holdable territory instead. Stock sends every leftover land unit to the highest-value holdable
+   * territory, which is usually the capital, so it ends far above what it needs (champion-7
+   * self-play: Moscow at a median 2.4x the German strength in reach). Counts a hit per released
+   * unit.
+   */
+  CAPITAL_ENOUGH,
+  /**
+   * Combat move keeps the low-value attacks (value at most 8, within 3 of my capital) that stock
+   * drops whenever the capital lacks local land superiority, as long as the capital still holds
+   * against the enemies' max counter-attack after all attacks (enemy win at most 5%, no TUV gain,
+   * counting stock's capital-check defenders); otherwise it drops them, lowest value first. Counts
+   * a hit per kept attack.
+   */
+  CAPITAL_ENOUGH_TRADE,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

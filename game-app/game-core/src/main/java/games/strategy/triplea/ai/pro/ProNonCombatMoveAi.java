@@ -1930,6 +1930,8 @@ class ProNonCombatMoveAi {
     // TODO: consider if territory ends up being safe
     final Predicate<Territory> canMoveSeaUnits = ProMatches.territoryCanMoveSeaUnits(player, true);
     final List<Unit> addedUnits = new ArrayList<>();
+    final boolean capitalEnough = proData.hasPatch(ProAiPatch.CAPITAL_ENOUGH);
+    final Map<Unit, Set<Territory>> toCapitalOptions = new HashMap<>();
     for (final Unit u : unitMoveMap.keySet()) {
       if (!Matches.unitIsLand().test(u) || addedUnits.contains(u)) {
         continue;
@@ -1992,9 +1994,17 @@ class ProNonCombatMoveAi {
         final List<Unit> unitsToAdd = ProTransportUtils.getUnitsToAdd(proData, u, moveMap);
         moveMap.get(maxValueTerritory).addUnits(unitsToAdd);
         addedUnits.addAll(unitsToAdd);
+        if (capitalEnough && maxValueTerritory.equals(proData.getMyCapital())) {
+          for (final Unit added : unitsToAdd) {
+            toCapitalOptions.put(added, new HashSet<>(unitMoveMap.getOrDefault(added, Set.of())));
+          }
+        }
       }
     }
     unitMoveMap.keySet().removeAll(addedUnits);
+    if (capitalEnough) {
+      releaseCapitalExcess(moveMap, toCapitalOptions);
+    }
 
     // Move land units towards nearest factory that is adjacent to the sea
     final Collection<Territory> myFactoriesAdjacentToSea =
@@ -2706,5 +2716,95 @@ class ProNonCombatMoveAi {
                 + clockWithout);
       }
     }
+  }
+
+  /** CAPITAL_ENOUGH: attacker win% the capital's defence must stay at or below after a release. */
+  static final double CAPITAL_ENOUGH_MAX_ENEMY_WIN = 5;
+
+  /**
+   * CAPITAL_ENOUGH: of the land units the best-value move sends to (or keeps in) my capital, keeps
+   * only as many as the capital needs to hold against the enemies' max attack (attacker win% at
+   * most {@link #CAPITAL_ENOUGH_MAX_ENEMY_WIN} and no TUV gain for the attacker), cheapest defence
+   * first, and sends the rest to their best-value holdable territory other than the capital.
+   * Changes nothing when the capital can't hold even with all of them.
+   */
+  private void releaseCapitalExcess(
+      final Map<Territory, ProTerritory> moveMap, final Map<Unit, Set<Territory>> options) {
+    final Territory capital = proData.getMyCapital();
+    if (options.isEmpty() || capital == null || !capital.isOwnedBy(player)) {
+      return;
+    }
+    final ProTerritory capitalTerritory = moveMap.get(capital);
+    if (capitalTerritory == null) {
+      return;
+    }
+    final List<Unit> base = new ArrayList<>(capitalTerritory.getEligibleDefenders(player));
+    base.removeAll(options.keySet());
+    final List<Unit> candidates = new ArrayList<>(options.keySet());
+    candidates.sort(
+        Comparator.comparingDouble(
+                (Unit u) ->
+                    -(double) u.getUnitAttachment().getDefense(u.getOwner())
+                        * u.getUnitAttachment().getHitPoints()
+                        / Math.max(1, proData.getUnitValue(u.getType())))
+            .thenComparingInt(u -> u.getUnitAttachment().getAttack(u.getOwner())));
+    if (!capitalHoldsWith(capitalTerritory, base, candidates, candidates.size())) {
+      return;
+    }
+    // Fewest kept candidates that still hold (holding grows with defenders)
+    int lo = 0;
+    int hi = candidates.size();
+    while (lo < hi) {
+      final int mid = (lo + hi) / 2;
+      if (capitalHoldsWith(capitalTerritory, base, candidates, mid)) {
+        hi = mid;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    for (final Unit u : candidates.subList(lo, candidates.size())) {
+      Territory best = null;
+      double bestValue = 0;
+      for (final Territory t : options.get(u)) {
+        final ProTerritory to = moveMap.get(t);
+        if (!t.equals(capital) && to != null && to.isCanHold() && to.getValue() > bestValue) {
+          best = t;
+          bestValue = to.getValue();
+        }
+      }
+      if (best == null) {
+        continue;
+      }
+      capitalTerritory.getUnits().remove(u);
+      moveMap.get(best).addUnit(u);
+      proData.countPatchHit(ProAiPatch.CAPITAL_ENOUGH);
+      ProLogger.debug(
+          "CAPITAL_ENOUGH: "
+              + u
+              + " released from "
+              + capital
+              + " to "
+              + best
+              + " value="
+              + bestValue
+              + ", kept "
+              + lo
+              + "/"
+              + candidates.size());
+    }
+  }
+
+  private boolean capitalHoldsWith(
+      final ProTerritory capital,
+      final List<Unit> base,
+      final List<Unit> candidates,
+      final int keep) {
+    if (capital.getMaxEnemyUnits().isEmpty()) {
+      return true;
+    }
+    final List<Unit> defenders = new ArrayList<>(base);
+    defenders.addAll(candidates.subList(0, keep));
+    final ProBattleResult result = calc.calculateBattleResults(proData, capital, defenders);
+    return result.getWinPercentage() <= CAPITAL_ENOUGH_MAX_ENEMY_WIN && result.getTuvSwing() <= 0;
   }
 }

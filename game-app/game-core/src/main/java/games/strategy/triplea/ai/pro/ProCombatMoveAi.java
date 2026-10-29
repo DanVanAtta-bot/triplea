@@ -75,6 +75,8 @@ public class ProCombatMoveAi {
   private ProTerritoryManager territoryManager;
   private boolean isDefensive;
   private boolean isBombing;
+  // CAPITAL_ENOUGH_TRADE: low-value attacks near the capital kept despite the defensive stance
+  private final Set<Territory> capitalEnoughTrades = new HashSet<>();
   // Measurement only: which rule set canHold, read by reportCombatMovePlan. Never read by
   // decisions.
   private final Map<ProTerritory, ProDecisionListener.CanHoldTrace> canHoldTraces =
@@ -102,6 +104,7 @@ public class ProCombatMoveAi {
         !ProBattleUtils.territoryHasLocalLandSuperiority(
             proData, proData.getMyCapital(), ProBattleUtils.MEDIUM_RANGE, player);
     isBombing = false;
+    capitalEnoughTrades.clear();
     ProLogger.debug("Currently in defensive stance: " + isDefensive);
 
     // Find the maximum number of units that can attack each territory and max enemy defenders
@@ -430,10 +433,14 @@ public class ProCombatMoveAi {
 
       // Remove negative value territories
       patd.setValue(attackValue);
-      if (attackValue <= 0
-          || (isDefensive
+      final boolean defensiveCut =
+          isDefensive
               && attackValue <= 8
-              && data.getMap().getDistance(proData.getMyCapital(), t) <= 3)) {
+              && data.getMap().getDistance(proData.getMyCapital(), t) <= 3;
+      if (attackValue > 0 && defensiveCut && proData.hasPatch(ProAiPatch.CAPITAL_ENOUGH_TRADE)) {
+        capitalEnoughTrades.add(t);
+        ProLogger.debug("CAPITAL_ENOUGH_TRADE: keeping low-value attack near capital: " + t);
+      } else if (attackValue <= 0 || defensiveCut) {
         ProLogger.debug(
             "Removing territory that has a negative attack value: "
                 + t.getName()
@@ -2717,6 +2724,78 @@ public class ProCombatMoveAi {
         ProLogger.debug("Can hold capital: " + myCapital.getName());
         break;
       }
+    }
+    if (proData.hasPatch(ProAiPatch.CAPITAL_ENOUGH_TRADE)) {
+      dropCapitalEnoughTradesUntilSafe(prioritizedTerritories, placeUnits);
+    }
+  }
+
+  /**
+   * CAPITAL_ENOUGH_TRADE: the attacks the defensive stance would have dropped stay only while the
+   * capital still holds against the enemies' max counter-attack (enemy win at most {@link
+   * ProNonCombatMoveAi#CAPITAL_ENOUGH_MAX_ENEMY_WIN}%, no TUV gain), with the defenders stock's
+   * capital check counts; otherwise they go, lowest value first.
+   */
+  private void dropCapitalEnoughTradesUntilSafe(
+      final List<ProTerritory> prioritizedTerritories, final List<Unit> placeUnits) {
+    final Map<Territory, ProTerritory> attackMap =
+        territoryManager.getAttackOptions().getTerritoryMap();
+    final Territory myCapital = proData.getMyCapital();
+    while (true) {
+      final List<ProTerritory> extras =
+          prioritizedTerritories.stream()
+              .filter(p -> capitalEnoughTrades.contains(p.getTerritory()))
+              .filter(p -> !p.getUnits().isEmpty() || !p.getAmphibAttackMap().isEmpty())
+              .collect(Collectors.toList());
+      if (extras.isEmpty()) {
+        return;
+      }
+      final List<Territory> territoriesToAttack = new ArrayList<>();
+      for (final ProTerritory t : prioritizedTerritories) {
+        territoriesToAttack.add(t.getTerritory());
+      }
+      territoryManager.populateEnemyAttackOptions(territoriesToAttack, List.of(myCapital));
+      final ProOtherMoveOptions enemyAttackOptions = territoryManager.getEnemyAttackOptions();
+      if (enemyAttackOptions.getMax(myCapital) == null) {
+        return;
+      }
+      final List<Unit> defenders = myCapital.getMatches(Matches.isUnitAllied(player));
+      defenders.addAll(placeUnits);
+      for (final Territory t : data.getMap().getNeighbors(myCapital, Matches.territoryIsLand())) {
+        defenders.addAll(t.getMatches(ProMatches.unitCanBeMovedAndIsOwnedLand(player, false)));
+      }
+      for (final ProTerritory t : attackMap.values()) {
+        defenders.removeAll(t.getUnits());
+      }
+      final Set<Unit> enemyAttackingUnits =
+          new HashSet<>(enemyAttackOptions.getMax(myCapital).getMaxUnits());
+      enemyAttackingUnits.addAll(enemyAttackOptions.getMax(myCapital).getMaxAmphibUnits());
+      final ProBattleResult result =
+          calc.calculateBattleResults(
+              proData,
+              myCapital,
+              enemyAttackingUnits,
+              defenders,
+              enemyAttackOptions.getMax(myCapital).getMaxBombardUnits());
+      if (result.getWinPercentage() <= ProNonCombatMoveAi.CAPITAL_ENOUGH_MAX_ENEMY_WIN
+          && result.getTuvSwing() <= 0) {
+        for (final ProTerritory p : extras) {
+          proData.countPatchHit(ProAiPatch.CAPITAL_ENOUGH_TRADE);
+          ProLogger.debug("CAPITAL_ENOUGH_TRADE: attacking " + p.getTerritory());
+        }
+        return;
+      }
+      final ProTerritory drop =
+          extras.stream().min(Comparator.comparingDouble(ProTerritory::getValue)).orElseThrow();
+      prioritizedTerritories.remove(drop);
+      drop.getUnits().clear();
+      drop.getAmphibAttackMap().clear();
+      drop.setBattleResult(null);
+      ProLogger.debug(
+          "CAPITAL_ENOUGH_TRADE: dropping "
+              + drop.getTerritory()
+              + ", capital enemy win%="
+              + result.getWinPercentage());
     }
   }
 
