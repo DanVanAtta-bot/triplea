@@ -113,9 +113,9 @@ public final class ProTerritoryValueUtils {
   }
 
   /**
-   * Like {@link #findSeaTerritoryValues(GamePlayer, List, List)}; with {@code fixed} (SEA_VALUE_FIX)
-   * the nearby convoy production and enemy unit terms are kept. Stock discards both sums, so every
-   * sea zone is worth 0.
+   * Like {@link #findSeaTerritoryValues(GamePlayer, List, List)}; with {@code fixed}
+   * (SEA_VALUE_FIX) the nearby convoy production and enemy unit terms are kept. Stock discards both
+   * sums, so every sea zone is worth 0.
    */
   public static Map<Territory, Double> findSeaTerritoryValues(
       final GamePlayer player,
@@ -163,8 +163,7 @@ public final class ProTerritoryValueUtils {
           // term carries the unit counts too, and the unit term counts them twice.
           final double unitCounts = enemyUnitValue / 2;
           nearbySeaProductionValue =
-              productionValue
-                  - sumUnitCountsByDistance(t, nearbyEnemySeaTerritories, player, data);
+              productionValue - sumUnitCountsByDistance(t, nearbyEnemySeaTerritories, player, data);
           nearbyEnemySeaUnitValue = unitCounts;
         }
 
