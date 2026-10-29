@@ -255,6 +255,13 @@ public enum ProAiPatch {
    * production, so a 0-PU island that completes a 5-PU objective is worth nothing.
    */
   NO_VALUE,
+  /**
+   * Log only: at purchase, predicts each enemy's next purchase and placement from game history
+   * ({@link games.strategy.triplea.ai.pro.util.ProOppPurchase}) and prints it with the previous
+   * prediction's error against the enemy's actual buy, to stdout. Changes no decision. Counts a hit
+   * per purchase phase it runs in.
+   */
+  OPP_PURCHASE_LOG,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

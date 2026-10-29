@@ -23,6 +23,7 @@ import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
+import games.strategy.triplea.ai.pro.util.ProOppPurchase;
 import games.strategy.triplea.ai.pro.util.ProPurchaseUtils;
 import games.strategy.triplea.ai.pro.util.ProTransportUtils;
 import games.strategy.triplea.attachments.PoliticalActionAttachment;
@@ -77,6 +78,7 @@ public abstract class AbstractProAi extends AbstractAi {
   private List<Territory> storedStrafingTerritories;
   // STRAFE_CANT_HOLD: territory name -> rounds to fight before retreating
   private Map<String, Integer> storedStrafeRetreats = Map.of();
+  private final ProOppPurchase oppPurchase = new ProOppPurchase();
 
   // Measurement only; never consulted by decision logic.
   @Getter @Setter @Nullable private ProDecisionListener decisionListener;
@@ -198,6 +200,9 @@ public abstract class AbstractProAi extends AbstractAi {
       final ProDanModel.Turn turn = ProDanModel.startTurn(proData, data, player);
       proData.setDanTurn(turn);
       ProLogger.info(player.getName() + " DAN " + turn);
+    }
+    if (!purchaseForBid && proData.isPatchOn(ProAiPatch.OPP_PURCHASE_LOG)) {
+      oppPurchase.run(data, player);
     }
     if (pusToSpend <= 0) {
       return;
