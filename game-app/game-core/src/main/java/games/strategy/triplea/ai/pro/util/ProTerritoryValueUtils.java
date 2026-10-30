@@ -43,7 +43,8 @@ public final class ProTerritoryValueUtils {
         3.0
             * TerritoryAttachment.getProduction(t)
             * (isEnemyFactory + 1)
-            * ProDanModel.incomeFactor(proData, t);
+            * ProDanModel.incomeFactor(proData, t)
+            * ProFlowAllocator.moveFactor(proData, t);
     if (ProUtils.isNeutralLand(t)) {
       final double strength =
           ProBattleUtils.estimateStrength(
@@ -345,7 +346,8 @@ public final class ProTerritoryValueUtils {
         double value =
             (TerritoryAttachment.getProduction(nearbyEnemyTerritory)
                     + ProNationalObjectiveUtils.value(proData, player, nearbyEnemyTerritory))
-                * ProDanModel.incomeFactor(proData, nearbyEnemyTerritory);
+                * ProDanModel.incomeFactor(proData, nearbyEnemyTerritory)
+                * ProFlowAllocator.moveFactor(proData, nearbyEnemyTerritory);
         if (ProUtils.isNeutralLand(nearbyEnemyTerritory)) {
           // find neutral value
           value = findTerritoryAttackValue(proData, player, nearbyEnemyTerritory) / 3;

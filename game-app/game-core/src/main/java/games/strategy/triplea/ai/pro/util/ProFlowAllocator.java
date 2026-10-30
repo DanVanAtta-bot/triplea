@@ -7,6 +7,8 @@ import games.strategy.engine.data.Territory;
 import games.strategy.engine.data.Unit;
 import games.strategy.engine.data.UnitType;
 import games.strategy.triplea.Constants;
+import games.strategy.triplea.ai.pro.ProAiPatch;
+import games.strategy.triplea.ai.pro.ProData;
 import games.strategy.triplea.attachments.TerritoryAttachment;
 import games.strategy.triplea.delegate.Matches;
 import games.strategy.triplea.util.TuvCostsCalculator;
@@ -223,6 +225,30 @@ public final class ProFlowAllocator {
       }
       return sb.toString();
     }
+  }
+
+  static final double MOVE_PUSH = 1.5;
+  static final double MOVE_HOLD = 0.8;
+
+  /**
+   * FLOW_MOVE: weight on a territory's value in attack and move values, by the flow plan: in a
+   * pushed direction's corridor x1.5, in a held one's (and no pushed one's) x0.8, else 1.
+   */
+  public static double moveFactor(final ProData proData, final Territory t) {
+    final Plan plan = proData.getFlowPlan();
+    if (plan == null || !proData.hasPatch(ProAiPatch.FLOW_MOVE)) {
+      return 1;
+    }
+    final double f;
+    if (plan.pushedCorridorOf(t) != null) {
+      f = MOVE_PUSH;
+    } else if (plan.heldCorridorOf(t) != null) {
+      f = MOVE_HOLD;
+    } else {
+      return 1;
+    }
+    proData.isPatchOn(ProAiPatch.FLOW_MOVE);
+    return f;
   }
 
   private record Reading(int round, double ratio, int ownProduction, Mode mode) {}

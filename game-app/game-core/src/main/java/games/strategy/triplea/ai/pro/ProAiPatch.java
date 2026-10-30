@@ -280,6 +280,19 @@ public enum ProAiPatch {
   FLOW_HOLD_MIX,
   /** With FLOW_ALLOCATOR: the push weight is x4 instead of x2. */
   FLOW_STRONG,
+  /**
+   * Flow plan in move values: a territory's value in combat attack values and in the land values
+   * that draw moves is x1.5 inside a pushed direction's corridor and x0.8 inside only held ones
+   * ({@link games.strategy.triplea.ai.pro.util.ProFlowAllocator#moveFactor}). The plan is computed
+   * at purchase with FLOW_ALLOCATOR or FLOW_LOG on.
+   */
+  FLOW_MOVE,
+  /**
+   * With FLOW_ALLOCATOR, while some direction is pushed: the land buy skips factories of held
+   * directions whose hold ratio is already met (their defenders are bought before it), leaving the
+   * PUs for pushed directions; leftover PUs still reach them through the remaining-production buy.
+   */
+  FLOW_HOLD_CAP,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

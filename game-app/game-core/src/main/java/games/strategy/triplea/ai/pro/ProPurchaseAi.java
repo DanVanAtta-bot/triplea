@@ -1629,9 +1629,25 @@ class ProPurchaseAi {
     final Map<Territory, Double> territoryValueMap =
         ProTerritoryValueUtils.findTerritoryValues(
             proData, player, List.of(), List.of(), territoriesToCheck);
+    final ProFlowAllocator.Plan flowPlan = proData.getFlowPlan();
+    final boolean flowHoldCap =
+        flowPlan != null
+            && proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR)
+            && proData.hasPatch(ProAiPatch.FLOW_HOLD_CAP)
+            && flowPlan.getDirections().stream()
+                .anyMatch(d -> d.mode() == ProFlowAllocator.Mode.PUSH);
     for (final ProPlaceTerritory placeTerritory : prioritizedLandTerritories) {
       final Territory t = placeTerritory.getTerritory();
       ProLogger.debug("Checking land place for " + t.getName());
+      if (flowHoldCap
+          && flowPlan.directionOf(t) != null
+          && flowPlan.directionOf(t).mode() == ProFlowAllocator.Mode.HOLD
+          && flowPlan.directionOf(t).holdNeed() <= 0
+          && player.getMatches(Matches.unitIsNotSea()).isEmpty()
+          && proData.isPatchOn(ProAiPatch.FLOW_HOLD_CAP)) {
+        // A held front whose hold is met: its defenders were bought above; the rest goes to pushes
+        continue;
+      }
 
       // Check remaining production
       int remainingUnitProduction = purchaseTerritories.get(t).getRemainingUnitProduction();

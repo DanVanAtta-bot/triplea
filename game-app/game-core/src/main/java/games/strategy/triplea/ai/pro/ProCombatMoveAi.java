@@ -16,6 +16,7 @@ import games.strategy.triplea.ai.pro.data.ProTransport;
 import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
+import games.strategy.triplea.ai.pro.util.ProFlowAllocator;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProMoveUtils;
 import games.strategy.triplea.ai.pro.util.ProNationalObjectiveUtils;
@@ -362,7 +363,8 @@ public class ProCombatMoveAi {
               * (1 - 0.5 * isAmphib)
               * productionAndIsCapital.production
               * ProDanModel.incomeFactor(proData, t)
-              * ProDanModel.holdFactor(proData, t);
+              * ProDanModel.holdFactor(proData, t)
+              * ProFlowAllocator.moveFactor(proData, t);
       double attackValue =
           (tuvSwing + territoryValue)
               * (1 + 4.0 * productionAndIsCapital.isCapital)
@@ -1505,6 +1507,7 @@ public class ProCombatMoveAi {
                     * production
                     * ProDanModel.incomeFactor(proData, t)
                     * ProDanModel.holdFactor(proData, t)
+                    * ProFlowAllocator.moveFactor(proData, t)
                 + capitalValue;
         double tuvSwing = result.getTuvSwing();
         if (isFfa == 1 && tuvSwing > 0) {

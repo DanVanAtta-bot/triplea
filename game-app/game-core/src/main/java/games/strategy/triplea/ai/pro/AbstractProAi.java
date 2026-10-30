@@ -207,7 +207,9 @@ public abstract class AbstractProAi extends AbstractAi {
       oppPurchase.run(data, player);
     }
     if (!purchaseForBid
-        && (proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR) || proData.hasPatch(ProAiPatch.FLOW_LOG))) {
+        && (proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR)
+            || proData.hasPatch(ProAiPatch.FLOW_LOG)
+            || proData.hasPatch(ProAiPatch.FLOW_MOVE))) {
       final ProFlowAllocator.Plan plan =
           flowAllocator.plan(
               data, player, pusToSpend, proData.hasPatch(ProAiPatch.FLOW_STRONG) ? 4.0 : 2.0);
