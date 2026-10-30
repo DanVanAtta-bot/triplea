@@ -1916,7 +1916,8 @@ public class ProCombatMoveAi {
                       swapped,
                       x.getType().getName() + " -> unused " + y.getType().getName()));
         }
-        // cheaper land units from other attacks
+        // cheaper land units and aircraft from other land attacks (aircraft for ground: ground
+        // holds a captured territory, aircraft don't stay in a trade for the counter-attack)
         for (final ProTerritory other : attacks) {
           if (other == trade || budget <= 0) {
             continue;
@@ -1926,11 +1927,12 @@ public class ProCombatMoveAi {
                   CollectionUtils.getMatches(
                       other.getUnits(),
                       y ->
-                          Matches.unitIsLand().test(y)
-                              && cost(y) < cost(x)
-                              && canReach(y, trade)
-                              && transportOf(other, y) == null
-                              && isPlainUnitInAttack(y)));
+                          canReach(y, trade)
+                              && (Matches.unitIsLand().test(y)
+                                  ? cost(y) < cost(x)
+                                      && transportOf(other, y) == null
+                                      && isPlainUnitInAttack(y)
+                                  : airWelcome && isSafeAir(y, t))));
           for (final Unit y : donors) {
             final List<Unit> swapped = new ArrayList<>(without);
             swapped.add(y);
