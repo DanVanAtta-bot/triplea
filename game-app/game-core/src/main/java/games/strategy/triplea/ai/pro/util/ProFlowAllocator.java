@@ -16,7 +16,6 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,31 +26,40 @@ import javax.annotation.Nullable;
 
 /**
  * FLOW_ALLOCATOR (Dan's notes A19-A27): splits a power's effort across its directions, each judged
- * by front economics. A direction is a route between opposing factory clusters (adjacent factories
- * merged; every cluster links to its nearest enemy cluster, by land if it can, else by sea; linked
- * clusters form one direction, land and sea links apart). Per direction, on the start-of-turn
- * board: own and enemy unit TUV in the corridor (the link paths plus one step), and the enemy's
- * next placement there (observed from history by {@link ProOppPurchase}; production capacity before
- * it has history).
+ * by front economics. A direction is a route from own factories to a group of enemy factories
+ * (A24): per cluster of adjacent own factories, enemy factories by route length in turns (land step
+ * 1, sea step 1/2; land routes first, else over water), each joining the first group whose
+ * factories its route passes within one step of, else starting a new one (at most three). Own
+ * clusters whose groups share an enemy factory merge. Per direction, on the start-of-turn board:
+ * own and enemy unit TUV in the corridor (the routes plus one step), and the enemy's next placement
+ * there (observed from history by {@link ProOppPurchase}; production capacity before it has
+ * history).
  *
- * <p>Fitted on Big World v3 self-play (scratch/ai-discipline): a front moves forward half the time
- * at own / (enemy + enemy placement) = 1.39 and holds half the time at 0.44. So pushing costs
- * {@code 1.39 x (enemy + placement) - own} and holding {@code 0.44 x (enemy + placement) - own}.
- * After paying every hold, the rest goes to the directions with the most enemy production per TUV
- * still needed, distance-discounted, while that reaches the attack ratio within a few turns; the
- * others hold. A pushed direction that stops gaining (ratio falling, no corridor production taken
- * for two turns) switches to hold for two rounds.
+ * <p>Fitted on champion-8 self-play with this direction definition (scratch/ai-loop-flow
+ * flowfit.py; Big World v3 carries the fit): a land route moves forward half the time at own /
+ * (enemy + enemy placement) = 1.13 and holds half the time at 0.39 (routes over water: 1.94 and
+ * 0.23). So pushing costs {@code attack ratio x (enemy + placement) - own} and holding {@code hold
+ * ratio x (enemy + placement) - own}. After paying every hold, the rest of the turn's PUs goes to
+ * the directions with the most enemy production per TUV still needed, distance-discounted, while
+ * that reaches the attack ratio within a few turns of spending; with none, the cheapest one within
+ * twice that is committed to. A pushed direction that stops gaining (ratio falling, no corridor
+ * production taken for two turns) switches to hold for two rounds.
  *
  * <p>The plan only reweights ProAI's own values (place order, unit mix, move values); it never
  * forbids a purchase or a move.
  */
 public final class ProFlowAllocator {
-  public static final double ATTACK_RATIO = 1.39;
-  public static final double HOLD_RATIO = 0.44;
+  // 50% points refitted on this direction definition (scratch/ai-loop-flow/tools/flowfit.py, Big
+  // World v3 champion-8 self-play): land routes 1.13 / 0.39, routes over water 1.94 / 0.23
+  public static final double ATTACK_RATIO = 1.13;
+  public static final double HOLD_RATIO = 0.39;
+  public static final double SEA_ATTACK_RATIO = 1.94;
+  public static final double SEA_HOLD_RATIO = 0.23;
   static final int MAX_TURNS_TO_PUSH = 3;
   static final int STALL_TURNS = 2;
   static final int COOLDOWN_ROUNDS = 2;
   static final double UNIT_PU = 3.5;
+  static final int MAX_DIRECTIONS = 3;
 
   public enum Mode {
     PUSH,
@@ -60,7 +68,8 @@ public final class ProFlowAllocator {
 
   /** One direction as this power sees it this turn. */
   public static final class Direction {
-    final String key;
+    String key;
+    String head = "";
     final boolean sea;
     final Set<String> myFactories = new TreeSet<>();
     final Set<String> enemyFactories = new TreeSet<>();
@@ -105,11 +114,11 @@ public final class ProFlowAllocator {
     }
 
     public double holdNeed() {
-      return Math.max(0, HOLD_RATIO * against() - own);
+      return Math.max(0, (sea ? SEA_HOLD_RATIO : HOLD_RATIO) * against() - own);
     }
 
     public double attackNeed() {
-      return Math.max(0, ATTACK_RATIO * against() - own);
+      return Math.max(0, (sea ? SEA_ATTACK_RATIO : ATTACK_RATIO) * against() - own);
     }
 
     double importance() {
@@ -229,31 +238,63 @@ public final class ProFlowAllocator {
     final List<GamePlayer> enemies = ProUtils.getPotentialEnemyPlayers(player);
     final Map<String, Map<String, Double>> forecast =
         predictor.forecastPlacement(data, player, enemies);
-    final List<Direction> dirs;
+    final Plan plan;
     try (GameData.Unlocker ignored = data.acquireReadLock()) {
-      dirs = directions(data, player, enemies, forecast, pus);
+      final List<Direction> dirs = directions(data, player, enemies, forecast, pus);
+      allocate(dirs, pus, round);
+      plan = new Plan(dirs, pushWeight);
+      mapPlaces(data, player, plan);
     }
-    allocate(dirs, pus, round);
-    final Plan plan = new Plan(dirs, pushWeight);
+    return plan;
+  }
+
+  /**
+   * Each own factory feeds the direction (of its cluster) whose enemy factories are nearest from
+   * it, by land if any is, else over water; each sea zone next to it, the nearest over water.
+   */
+  private static void mapPlaces(final GameData data, final GamePlayer player, final Plan plan) {
     final GameMap map = data.getMap();
-    for (final Direction d : dirs) {
-      for (final String f : d.myFactories) {
-        final Territory t = map.getTerritoryOrNull(f);
-        if (t == null) {
-          continue;
-        }
-        if (!d.sea || !plan.landPlace.containsKey(f)) {
-          plan.landPlace.put(f, d);
-        }
-        for (final Territory z : map.getNeighbors(t, Matches.territoryIsWater())) {
-          final Direction prev = plan.seaPlace.get(z.getName());
-          if (prev == null || (d.sea && !prev.sea)) {
-            plan.seaPlace.put(z.getName(), d);
-          }
+    for (final Territory f : map.getTerritories()) {
+      if (f.isWater() || !f.isOwnedBy(player) || !f.anyUnitsMatch(Matches.unitCanProduceUnits())) {
+        continue;
+      }
+      final List<Direction> mine =
+          plan.directions.stream().filter(d -> d.myFactories.contains(f.getName())).toList();
+      if (mine.isEmpty()) {
+        continue;
+      }
+      final Direction land = nearest(map, f, mine, true);
+      plan.landPlace.put(f.getName(), land != null ? land : nearest(map, f, mine, false));
+      for (final Territory z : map.getNeighbors(f, Matches.territoryIsWater())) {
+        final List<Direction> sea = mine.stream().filter(d -> d.sea).toList();
+        final Direction best = nearest(map, z, sea.isEmpty() ? mine : sea, false);
+        final Direction prev = plan.seaPlace.get(z.getName());
+        if (best != null && (prev == null || best.mode == Mode.PUSH)) {
+          plan.seaPlace.put(z.getName(), best);
         }
       }
     }
-    return plan;
+  }
+
+  @Nullable
+  private static Direction nearest(
+      final GameMap map, final Territory from, final List<Direction> dirs, final boolean landOnly) {
+    final Map<Territory, Double> dist = dijkstra(map, Set.of(from), landOnly).dist();
+    Direction best = null;
+    double bestDist = Double.MAX_VALUE;
+    for (final Direction d : dirs) {
+      if (landOnly && d.sea) {
+        continue;
+      }
+      for (final String e : d.enemyFactories) {
+        final Double x = dist.get(map.getTerritoryOrNull(e));
+        if (x != null && x < bestDist) {
+          bestDist = x;
+          best = d;
+        }
+      }
+    }
+    return best;
   }
 
   private void allocate(final List<Direction> dirs, final int pus, final int round) {
@@ -267,36 +308,44 @@ public final class ProFlowAllocator {
                 (Direction d) -> d.importance() / Math.max(1, d.attackNeed() - d.holdNeed()))
             .reversed()
             .thenComparing(d -> d.key));
+    Direction commit = null;
+    double commitTurns = Double.MAX_VALUE;
     for (final Direction d : order) {
       final Deque<Reading> hist = past.computeIfAbsent(d.key, k -> new ArrayDeque<>());
-      if (d.capacity <= 0) {
-        d.mode = Mode.HOLD;
-        d.why = "no-capacity";
-      } else if (holdUntil.getOrDefault(d.key, 0) >= round) {
-        d.mode = Mode.HOLD;
+      if (holdUntil.getOrDefault(d.key, 0) >= round) {
         d.why = "cooldown";
       } else if (d.importance() <= 0) {
-        d.mode = Mode.HOLD;
         d.why = "no-gain";
       } else if (stalled(hist, d)) {
-        d.mode = Mode.HOLD;
         d.why = "stalled";
         holdUntil.put(d.key, round + COOLDOWN_ROUNDS);
       } else {
-        final double extra = Math.max(0, d.attackNeed() - Math.min(d.holdNeed(), d.capacity));
-        final double rate = Math.min(Math.max(0, free), d.capacity);
-        if (extra <= 0) {
+        final double extra = Math.max(0, d.attackNeed() - d.holdNeed());
+        final double rate = Math.min(free, d.capacity);
+        final double turns = extra <= 0 ? 0 : rate > 0 ? Math.ceil(extra / rate) : 99;
+        if (turns <= MAX_TURNS_TO_PUSH) {
           d.mode = Mode.PUSH;
-          d.why = "at-ratio";
-        } else if (rate > 0 && Math.ceil(extra / rate) <= MAX_TURNS_TO_PUSH) {
-          d.mode = Mode.PUSH;
-          d.why = String.format("turns=%.0f", Math.ceil(extra / rate));
-          free -= Math.min(extra, rate);
+          d.why = extra <= 0 ? "at-ratio" : String.format("turns=%.0f", turns);
+          free -= Math.min(extra, Math.max(0, rate));
         } else {
-          d.mode = Mode.HOLD;
-          d.why = "too-dear";
+          d.why = String.format("too-dear(%.0f)", turns);
+          if (turns < commitTurns) {
+            commitTurns = turns;
+            commit = d;
+          }
         }
       }
+    }
+    // Committing in a direction beats spreading: with nothing pushable, push the best one whose
+    // price can be met in twice the horizon
+    if (commit != null
+        && commitTurns <= 2 * MAX_TURNS_TO_PUSH
+        && dirs.stream().noneMatch(d -> d.mode == Mode.PUSH)) {
+      commit.mode = Mode.PUSH;
+      commit.why = String.format("commit(%.0f)", commitTurns);
+    }
+    for (final Direction d : dirs) {
+      final Deque<Reading> hist = past.get(d.key);
       hist.addLast(new Reading(round, d.ratio(), d.ownProduction, d.mode));
       while (hist.size() > STALL_TURNS + 1) {
         hist.removeFirst();
@@ -304,7 +353,10 @@ public final class ProFlowAllocator {
     }
   }
 
-  /** Pushed on each of the last turns, yet the ratio fell and no corridor production was taken. */
+  /**
+   * Pushed on each of the last turns, yet below the attack ratio, the ratio fell and no corridor
+   * production was taken: the front isn't working.
+   */
   private static boolean stalled(final Deque<Reading> hist, final Direction d) {
     if (hist.size() < STALL_TURNS) {
       return false;
@@ -315,11 +367,19 @@ public final class ProFlowAllocator {
       return false;
     }
     final Reading first = last.get(0);
-    return d.ratio() < first.ratio() && d.ownProduction <= first.ownProduction();
+    return d.attackNeed() > 0
+        && d.ratio() < first.ratio()
+        && d.ownProduction <= first.ownProduction();
   }
 
   // ------------------------------------------------------------------ directions
 
+  /**
+   * Per own factory cluster, enemy factories by distance (land routes first, then over water); an
+   * enemy factory whose route passes within one step of an earlier group's factories joins that
+   * group (a common shortest path is one direction, A24), else it starts a new group. At most
+   * {@link #MAX_DIRECTIONS} groups per cluster, none farther than twice the nearest plus two.
+   */
   private static List<Direction> directions(
       final GameData data,
       final GamePlayer player,
@@ -331,89 +391,125 @@ public final class ProFlowAllocator {
     final Predicate<GamePlayer> isEnemy = enemySet::contains;
     final Predicate<GamePlayer> isFriend =
         p -> p.equals(player) || data.getRelationshipTracker().isAllied(player, p);
-    final List<Territory> ownSide = new ArrayList<>();
-    final List<Territory> enemySide = new ArrayList<>();
+    final List<Territory> mine = new ArrayList<>();
+    final List<Territory> theirs = new ArrayList<>();
     for (final Territory t : map.getTerritories()) {
       if (t.isWater() || !t.anyUnitsMatch(Matches.unitCanProduceUnits())) {
         continue;
       }
-      if (isFriend.test(t.getOwner())) {
-        ownSide.add(t);
+      if (t.isOwnedBy(player)) {
+        mine.add(t);
       } else if (isEnemy.test(t.getOwner())) {
-        enemySide.add(t);
+        theirs.add(t);
       }
     }
-    if (ownSide.stream().noneMatch(t -> t.isOwnedBy(player)) || enemySide.isEmpty()) {
-      return List.of();
-    }
-    final List<Set<Territory>> ownClusters = clusters(map, ownSide);
-    final List<Set<Territory>> enemyClusters = clusters(map, enemySide);
-    // links: every cluster to its nearest opposing cluster
-    record Link(Set<Territory> own, Set<Territory> enemy, List<Territory> path, boolean sea) {}
-    final List<Link> links = new ArrayList<>();
-    for (int side = 0; side < 2; side++) {
-      final List<Set<Territory>> from = side == 0 ? ownClusters : enemyClusters;
-      final List<Set<Territory>> to = side == 0 ? enemyClusters : ownClusters;
-      final Set<Territory> targets = new HashSet<>();
-      to.forEach(targets::addAll);
-      for (final Set<Territory> c : from) {
-        boolean sea = false;
-        List<Territory> path = shortestPath(map, c, targets, true);
-        if (path == null) {
-          sea = true;
-          path = shortestPath(map, c, targets, false);
-        }
-        if (path == null) {
-          continue;
-        }
-        final Territory end = path.get(path.size() - 1);
-        final Set<Territory> other = to.stream().filter(s -> s.contains(end)).findFirst().get();
-        links.add(side == 0 ? new Link(c, other, path, sea) : new Link(other, c, path, sea));
-      }
-    }
-    // union-find over clusters, land and sea links apart
     final List<Direction> out = new ArrayList<>();
-    for (final boolean sea : new boolean[] {false, true}) {
-      final Map<Set<Territory>, Set<Territory>> parent = new HashMap<>();
-      final List<Link> ls = links.stream().filter(l -> l.sea() == sea).toList();
-      for (final Link l : ls) {
-        union(parent, l.own(), l.enemy());
-      }
-      final Map<Set<Territory>, List<Link>> groups = new LinkedHashMap<>();
-      for (final Link l : ls) {
-        groups.computeIfAbsent(find(parent, l.own()), k -> new ArrayList<>()).add(l);
-      }
-      for (final List<Link> g : groups.values()) {
-        final Set<Territory> mine = new LinkedHashSet<>();
-        final Set<Territory> theirs = new LinkedHashSet<>();
-        final Set<Territory> path = new HashSet<>();
-        int len = Integer.MAX_VALUE;
-        for (final Link l : g) {
-          l.own().stream().filter(t -> t.isOwnedBy(player)).forEach(mine::add);
-          theirs.addAll(l.enemy());
-          path.addAll(l.path());
-          len = Math.min(len, l.path().size() - 1);
+    if (mine.isEmpty() || theirs.isEmpty()) {
+      return out;
+    }
+    final List<Direction> all = new ArrayList<>();
+    final List<Set<Territory>> allPaths = new ArrayList<>();
+    for (final Set<Territory> cluster : clusters(map, mine)) {
+      final Search land = dijkstra(map, cluster, true);
+      final Search any = dijkstra(map, cluster, false);
+      record Cand(Territory t, double dist, boolean sea) {}
+      final List<Cand> cands = new ArrayList<>();
+      for (final Territory e : theirs) {
+        final Double dl = land.dist().get(e);
+        final Double da = any.dist().get(e);
+        if (dl != null) {
+          cands.add(new Cand(e, dl, false));
+        } else if (da != null) {
+          cands.add(new Cand(e, da, true));
         }
-        if (mine.isEmpty()) {
-          continue;
-        }
-        final Direction d =
-            new Direction(
-                theirs.stream().map(Territory::getName).sorted().findFirst().orElse("?")
-                    + "<-"
-                    + mine.stream().map(Territory::getName).sorted().findFirst().orElse("?"),
-                sea);
-        mine.forEach(t -> d.myFactories.add(t.getName()));
-        theirs.forEach(t -> d.enemyFactories.add(t.getName()));
-        d.pathLength = len;
-        final Set<Territory> corridor = new HashSet<>(path);
-        for (final Territory t : path) {
-          corridor.addAll(map.getNeighbors(t, Matches.territoryIsImpassable().negate()));
-        }
-        corridor.forEach(t -> d.corridor.add(t.getName()));
-        out.add(d);
-        fill(d, corridor, theirs, mine, player, isFriend, isEnemy, enemies, forecast, pus, data);
       }
+      if (cands.isEmpty()) {
+        continue;
+      }
+      cands.sort(Comparator.comparingDouble(Cand::dist).thenComparing(c -> c.t().getName()));
+      final double limit = 2 * cands.get(0).dist() + 2;
+      final List<List<Territory>> groupPaths = new ArrayList<>();
+      final List<Set<Territory>> groupNear = new ArrayList<>();
+      final List<Direction> groups = new ArrayList<>();
+      final String head = sorted(cluster).get(0).getName();
+      for (final Cand c : cands) {
+        final List<Territory> path = (c.sea() ? any : land).path(c.t());
+        int joined = -1;
+        for (int i = 0; i < groups.size() && joined < 0; i++) {
+          if (groups.get(i).sea == c.sea() && path.stream().anyMatch(groupNear.get(i)::contains)) {
+            joined = i;
+          }
+        }
+        if (joined < 0) {
+          if (groups.size() >= MAX_DIRECTIONS || c.dist() > limit) {
+            continue;
+          }
+          final Direction d = new Direction(head, c.sea());
+          d.head = c.t().getName();
+          cluster.forEach(t -> d.myFactories.add(t.getName()));
+          d.pathLength = path.size() - 1;
+          groups.add(d);
+          groupPaths.add(new ArrayList<>());
+          groupNear.add(new HashSet<>());
+          joined = groups.size() - 1;
+        }
+        final Direction d = groups.get(joined);
+        d.enemyFactories.add(c.t().getName());
+        groupPaths.get(joined).addAll(path);
+        groupNear.get(joined).add(c.t());
+        groupNear.get(joined).addAll(map.getNeighbors(c.t()));
+      }
+      for (int i = 0; i < groups.size(); i++) {
+        all.add(groups.get(i));
+        allPaths.add(new HashSet<>(groupPaths.get(i)));
+      }
+    }
+    // Directions of different own clusters that share an enemy factory are one direction
+    final List<Direction> merged = new ArrayList<>();
+    final List<Set<Territory>> mergedPaths = new ArrayList<>();
+    for (int i = 0; i < all.size(); i++) {
+      final Direction d = all.get(i);
+      boolean done = false;
+      for (int j = 0; j < merged.size() && !done; j++) {
+        final Direction o = merged.get(j);
+        if (o.sea == d.sea && o.head.equals(d.head)) {
+          o.myFactories.addAll(d.myFactories);
+          o.enemyFactories.addAll(d.enemyFactories);
+          o.pathLength = Math.min(o.pathLength, d.pathLength);
+          mergedPaths.get(j).addAll(allPaths.get(i));
+          done = true;
+        }
+      }
+      if (!done) {
+        merged.add(d);
+        mergedPaths.add(allPaths.get(i));
+      }
+    }
+    for (int i = 0; i < merged.size(); i++) {
+      final Direction d = merged.get(i);
+      d.key = d.myFactories.iterator().next() + (d.sea ? "~>" : "->") + d.head;
+      final Set<Territory> corridor = new HashSet<>(mergedPaths.get(i));
+      for (final Territory t : mergedPaths.get(i)) {
+        corridor.addAll(map.getNeighbors(t, Matches.territoryIsImpassable().negate()));
+      }
+      corridor.forEach(t -> d.corridor.add(t.getName()));
+      final Set<Territory> enemyFactories = new HashSet<>();
+      d.enemyFactories.forEach(n -> enemyFactories.add(map.getTerritoryOrNull(n)));
+      final Set<Territory> myFactories = new HashSet<>();
+      d.myFactories.forEach(n -> myFactories.add(map.getTerritoryOrNull(n)));
+      fill(
+          d,
+          corridor,
+          enemyFactories,
+          myFactories,
+          player,
+          isFriend,
+          isEnemy,
+          enemies,
+          forecast,
+          pus,
+          data);
+      out.add(d);
     }
     return out;
   }
@@ -520,67 +616,61 @@ public final class ProFlowAllocator {
     return out;
   }
 
-  /** BFS from any of {@code from} to the nearest of {@code targets}; land only if asked. */
-  @Nullable
-  private static List<Territory> shortestPath(
-      final GameMap map,
-      final Set<Territory> from,
-      final Set<Territory> targets,
-      final boolean landOnly) {
-    final Map<Territory, Territory> prev = new HashMap<>();
-    final Deque<Territory> q = new ArrayDeque<>();
-    for (final Territory t : sorted(from)) {
-      prev.put(t, t);
-      q.add(t);
-    }
-    while (!q.isEmpty()) {
-      final Territory t = q.poll();
-      if (targets.contains(t)) {
-        final List<Territory> path = new ArrayList<>();
-        Territory c = t;
-        while (prev.get(c) != c) {
-          path.add(0, c);
-          c = prev.get(c);
-        }
+  private record Search(Map<Territory, Double> dist, Map<Territory, Territory> prev) {
+    List<Territory> path(final Territory to) {
+      final List<Territory> path = new ArrayList<>();
+      Territory c = to;
+      while (c != null) {
         path.add(0, c);
-        return path;
+        c = prev.get(c);
       }
-      for (final Territory n : sorted(map.getNeighbors(t))) {
-        if (prev.containsKey(n)
-            || Matches.territoryIsImpassable().test(n)
-            || (landOnly && n.isWater())) {
+      return path;
+    }
+  }
+
+  /**
+   * Shortest routes from {@code from}, in turns (A27): a land step 1, a sea step 0.5 (transports
+   * and fleets move two), landing from the sea 1. Land only: land steps through passable land.
+   */
+  private static Search dijkstra(
+      final GameMap map, final Set<Territory> from, final boolean landOnly) {
+    final Map<Territory, Double> dist = new HashMap<>();
+    final Map<Territory, Territory> prev = new HashMap<>();
+    final java.util.PriorityQueue<Map.Entry<Territory, Double>> q =
+        new java.util.PriorityQueue<>(
+            Comparator.comparingDouble((Map.Entry<Territory, Double> e) -> e.getValue())
+                .thenComparing(e -> e.getKey().getName()));
+    for (final Territory t : from) {
+      dist.put(t, 0.0);
+      q.add(Map.entry(t, 0.0));
+    }
+    final Predicate<Territory> impassable = Matches.territoryIsImpassable();
+    while (!q.isEmpty()) {
+      final Map.Entry<Territory, Double> e = q.poll();
+      final Territory t = e.getKey();
+      if (e.getValue() > dist.get(t)) {
+        continue;
+      }
+      for (final Territory n : map.getNeighbors(t)) {
+        if (impassable.test(n) || (landOnly && n.isWater())) {
           continue;
         }
-        prev.put(n, t);
-        q.add(n);
+        final double step = n.isWater() ? 0.5 : 1.0;
+        final double nd = e.getValue() + step;
+        final Double old = dist.get(n);
+        if (old == null || nd < old - 1e-9) {
+          dist.put(n, nd);
+          prev.put(n, t);
+          q.add(Map.entry(n, nd));
+        }
       }
     }
-    return null;
+    return new Search(dist, prev);
   }
 
   private static List<Territory> sorted(final Set<Territory> ts) {
     final List<Territory> out = new ArrayList<>(ts);
     out.sort(Comparator.comparing(Territory::getName));
     return out;
-  }
-
-  private static Set<Territory> find(
-      final Map<Set<Territory>, Set<Territory>> parent, final Set<Territory> x) {
-    Set<Territory> c = x;
-    while (parent.getOrDefault(c, c) != c) {
-      c = parent.get(c);
-    }
-    return c;
-  }
-
-  private static void union(
-      final Map<Set<Territory>, Set<Territory>> parent,
-      final Set<Territory> a,
-      final Set<Territory> b) {
-    final Set<Territory> ra = find(parent, a);
-    final Set<Territory> rb = find(parent, b);
-    if (ra != rb) {
-      parent.put(ra, rb);
-    }
   }
 }
