@@ -1727,7 +1727,7 @@ public class ProCombatMoveAi {
   }
 
   /** TRADE_REASSIGN: a trade's capture chance may drop this many points below its plan. */
-  static final double TRADE_REASSIGN_SLACK = 10;
+  static final double TRADE_REASSIGN_SLACK = 5;
 
   /** TRADE_REASSIGN: an attack giving up a unit may lose this many points of win chance. */
   static final double TRADE_REASSIGN_DONOR_SLACK = 3;
@@ -2116,8 +2116,11 @@ public class ProCombatMoveAi {
               : calc.calculateBattleResults(
                   proData, t, patd.getMaxEnemyUnits(), leftThere, patd.getMaxEnemyBombardUnits());
       final boolean trade = counter != null && !canHoldAgainstCounterAttack(t, counter);
+      // national objectives riding on the territory count like production (NO_VALUE)
+      final double objectives = 2 * ProNationalObjectiveUtils.value(proData, player, t);
       final double worth =
           tradedTerritoryWorth(t)
+              + objectives
               + (trade
                   ? 0
                   : TerritoryAttachment.getProduction(t)
