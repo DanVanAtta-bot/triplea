@@ -26,7 +26,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "triplea-ai-loop"
+rootProject.name = "triplea-flow"
 
 include(":ai")
 project(":ai").projectDir = file("game-app/ai")
