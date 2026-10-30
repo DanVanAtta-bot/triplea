@@ -263,7 +263,11 @@ public final class ProFlowAllocator {
 
   /** Builds this turn's plan on the start-of-turn board ({@code data} is the real game). */
   public Plan plan(
-      final GameData data, final GamePlayer player, final int pus, final double pushWeight) {
+      final GameData data,
+      final GamePlayer player,
+      final int pus,
+      final double pushWeight,
+      final boolean onePush) {
     final int round = data.getSequence().getRound();
     final List<GamePlayer> enemies = ProUtils.getPotentialEnemyPlayers(player);
     final Map<String, Map<String, Double>> forecast =
@@ -271,7 +275,7 @@ public final class ProFlowAllocator {
     final Plan plan;
     try (GameData.Unlocker ignored = data.acquireReadLock()) {
       final List<Direction> dirs = directions(data, player, enemies, forecast, pus);
-      allocate(dirs, pus, round);
+      allocate(dirs, pus, round, onePush);
       plan = new Plan(dirs, pushWeight);
       mapPlaces(data, player, plan);
     }
@@ -327,7 +331,8 @@ public final class ProFlowAllocator {
     return best;
   }
 
-  private void allocate(final List<Direction> dirs, final int pus, final int round) {
+  private void allocate(
+      final List<Direction> dirs, final int pus, final int round, final boolean onePush) {
     double free = pus;
     for (final Direction d : dirs) {
       free -= Math.min(d.holdNeed(), d.capacity);
@@ -373,6 +378,19 @@ public final class ProFlowAllocator {
         && dirs.stream().noneMatch(d -> d.mode == Mode.PUSH)) {
       commit.mode = Mode.PUSH;
       commit.why = String.format("commit(%.0f)", commitTurns);
+    }
+    if (onePush) {
+      // One push at a time: the first pushed direction in the order keeps it
+      boolean first = true;
+      for (final Direction d : order) {
+        if (d.mode == Mode.PUSH) {
+          if (!first) {
+            d.mode = Mode.HOLD;
+            d.why += ",one-push";
+          }
+          first = false;
+        }
+      }
     }
     for (final Direction d : dirs) {
       final Deque<Reading> hist = past.get(d.key);

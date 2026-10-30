@@ -292,6 +292,11 @@ public enum ProAiPatch {
    * at purchase with FLOW_ALLOCATOR or FLOW_LOG on.
    */
   FLOW_MOVE,
+  /**
+   * Flow plan: at most one pushed direction per power (the best by enemy production per TUV still
+   * needed); the others hold. Committing in one direction (A20, A22).
+   */
+  FLOW_ONE_PUSH,
   /** With FLOW_MOVE: x2.0 in pushed corridors and x0.6 in held ones. */
   FLOW_MOVE_STRONG,
   /** With FLOW_MOVE: only the pushed corridors' weight; held corridors stay x1. */

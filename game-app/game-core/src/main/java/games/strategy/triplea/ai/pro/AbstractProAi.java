@@ -212,7 +212,11 @@ public abstract class AbstractProAi extends AbstractAi {
             || proData.hasPatch(ProAiPatch.FLOW_MOVE))) {
       final ProFlowAllocator.Plan plan =
           flowAllocator.plan(
-              data, player, pusToSpend, proData.hasPatch(ProAiPatch.FLOW_STRONG) ? 4.0 : 2.0);
+              data,
+              player,
+              pusToSpend,
+              proData.hasPatch(ProAiPatch.FLOW_STRONG) ? 4.0 : 2.0,
+              proData.hasPatch(ProAiPatch.FLOW_ONE_PUSH));
       proData.setFlowPlan(plan);
       if (proData.isPatchOn(ProAiPatch.FLOW_LOG)) {
         System.out.printf(
