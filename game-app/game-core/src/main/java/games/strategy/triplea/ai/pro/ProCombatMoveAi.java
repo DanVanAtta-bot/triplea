@@ -1727,7 +1727,7 @@ public class ProCombatMoveAi {
   }
 
   /** TRADE_REASSIGN: a trade's capture chance may drop this many points below its plan. */
-  static final double TRADE_REASSIGN_SLACK = 5;
+  static final double TRADE_REASSIGN_SLACK = 10;
 
   /** TRADE_REASSIGN: an attack giving up a unit may lose this many points of win chance. */
   static final double TRADE_REASSIGN_DONOR_SLACK = 3;
