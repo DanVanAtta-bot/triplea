@@ -28,6 +28,7 @@ import games.strategy.triplea.ai.pro.logging.ProLogger;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProClockUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
+import games.strategy.triplea.ai.pro.util.ProFlowAllocator;
 import games.strategy.triplea.ai.pro.util.ProKillUtils;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
@@ -1446,6 +1447,26 @@ class ProPurchaseAi {
     }
   }
 
+  /**
+   * FLOW_ALLOCATOR: re-sorts place territories (already sorted by value) by value times the flow
+   * plan's direction weight; a stable sort, so ties keep their order.
+   */
+  private void flowSort(final List<ProPlaceTerritory> sorted) {
+    final ProFlowAllocator.Plan flow = proData.getFlowPlan();
+    if (flow == null || !proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR) || sorted.size() < 2) {
+      return;
+    }
+    final List<ProPlaceTerritory> before = new ArrayList<>(sorted);
+    sorted.sort(
+        Comparator.comparingDouble(
+                (ProPlaceTerritory p) -> p.getStrategicValue() * flow.placeWeight(p.getTerritory()))
+            .reversed());
+    if (!before.equals(sorted)) {
+      proData.isPatchOn(ProAiPatch.FLOW_ALLOCATOR);
+      ProLogger.debug("FLOW place order " + before + " -> " + sorted);
+    }
+  }
+
   private List<ProPlaceTerritory> prioritizeLandTerritories(
       final Map<Territory, ProPurchaseTerritory> purchaseTerritories) {
 
@@ -1479,6 +1500,7 @@ class ProPurchaseAi {
     // Sort territories by value
     prioritizedLandTerritories.sort(
         Comparator.comparingDouble(ProPlaceTerritory::getStrategicValue).reversed());
+    flowSort(prioritizedLandTerritories);
     for (final ProPlaceTerritory placeTerritory : prioritizedLandTerritories) {
       ProLogger.debug(
           placeTerritory.toString() + " strategicValue=" + placeTerritory.getStrategicValue());
@@ -1671,6 +1693,16 @@ class ProPurchaseAi {
         // A stack that holds but that enemy air can strafe: pad it with cheap hit points, so a
         // strafe trades fighters for infantry
         fodderPercent = PAD_FODDER_PERCENT;
+      }
+      final ProFlowAllocator.Plan flow = proData.getFlowPlan();
+      if (flow != null
+          && proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR)
+          && proData.hasPatch(ProAiPatch.FLOW_HOLD_MIX)
+          && flow.directionOf(t) != null
+          && flow.directionOf(t).mode() == ProFlowAllocator.Mode.HOLD
+          && proData.isPatchOn(ProAiPatch.FLOW_HOLD_MIX)) {
+        // A held front: defence buys more combat power per TUV, so more cheap hit points
+        fodderPercent = Math.min(90, fodderPercent + 15);
       }
       ProLogger.debug(t + ", enemyDistance=" + enemyDistance + ", fodderPercent=" + fodderPercent);
       final Set<Territory> neighbors =
@@ -2089,6 +2121,7 @@ class ProPurchaseAi {
     final List<ProPlaceTerritory> sortedTerritories = new ArrayList<>(seaPlaceTerritories);
     sortedTerritories.sort(
         Comparator.comparingDouble(ProPlaceTerritory::getStrategicValue).reversed());
+    flowSort(sortedTerritories);
     ProLogger.debug("Sorted sea territories:");
     for (final ProPlaceTerritory placeTerritory : sortedTerritories) {
       ProLogger.debug(placeTerritory.toString() + " value=" + placeTerritory.getStrategicValue());
@@ -2840,6 +2873,7 @@ class ProPurchaseAi {
     // Sort territories by value
     prioritizedLandTerritories.sort(
         Comparator.comparingDouble(ProPlaceTerritory::getStrategicValue).reversed());
+    flowSort(prioritizedLandTerritories);
     ProLogger.debug(
         "Sorted land territories with remaining production: " + prioritizedLandTerritories);
 

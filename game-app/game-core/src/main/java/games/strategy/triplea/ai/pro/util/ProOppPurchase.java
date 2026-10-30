@@ -144,6 +144,51 @@ public final class ProOppPurchase {
         TAG, player.getName(), round, (System.nanoTime() - start) / 1e6, nanos / 1e6 / runs);
   }
 
+  /**
+   * The model's forecast of each enemy's next placement, in PUs per site (an own land factory's
+   * name, or {@code sea:<zone>} for a sea zone next to none), with no logging and no error
+   * tracking. Enemies without purchase history are left out. Keeps its own factory bookkeeping, so
+   * use a separate instance from the one {@link #run} logs with.
+   */
+  public Map<String, Map<String, Double>> forecastPlacement(
+      final GameData data, final GamePlayer player, final List<GamePlayer> enemies) {
+    final int round = data.getSequence().getRound();
+    final Map<String, List<TurnRec>> turns;
+    try (GameData.Unlocker ignored = data.acquireReadLock()) {
+      turns = readHistory(data);
+    }
+    final TuvCostsCalculator tuv = new TuvCostsCalculator();
+    final Map<String, Map<String, Double>> out = new HashMap<>();
+    for (final GamePlayer enemy : enemies) {
+      final List<TurnRec> ts = turns.getOrDefault(enemy.getName(), List.of());
+      final IntegerMap<UnitType> costs = tuv.getCostsForTuv(enemy);
+      final Map<Territory, Integer> factories = factories(data, enemy);
+      final Map<String, Integer> seen =
+          firstSeen.computeIfAbsent(enemy.getName(), k -> new HashMap<>());
+      final boolean firstLook = seen.isEmpty();
+      final List<Territory> fresh = new ArrayList<>();
+      for (final Territory f : factories.keySet()) {
+        if (!seen.containsKey(f.getName())) {
+          seen.put(f.getName(), firstLook ? 0 : round);
+          if (!firstLook) {
+            fresh.add(f);
+          }
+        }
+      }
+      seen.keySet()
+          .removeIf(n -> factories.keySet().stream().noneMatch(t -> t.getName().equals(n)));
+      if (ts.isEmpty()) {
+        continue;
+      }
+      final double spend = spend(ts, costs, enemy.getResources().getQuantity(Constants.PUS));
+      final Prediction m = model(enemy, ts, costs, factories, seen, fresh, spend);
+      final Map<String, Double> pus = new HashMap<>();
+      m.sites().forEach((k, v) -> pus.put(k, v * spend));
+      out.put(enemy.getName(), pus);
+    }
+    return out;
+  }
+
   private void check(
       final GamePlayer enemy,
       final List<TurnRec> ts,

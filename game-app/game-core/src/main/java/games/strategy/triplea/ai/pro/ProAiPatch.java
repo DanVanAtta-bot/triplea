@@ -262,6 +262,24 @@ public enum ProAiPatch {
    * per purchase phase it runs in.
    */
   OPP_PURCHASE_LOG,
+  /**
+   * Flow allocator (Dan's notes A19-A27, {@link
+   * games.strategy.triplea.ai.pro.util.ProFlowAllocator}): at purchase, splits the power's
+   * directions (routes between opposing factory clusters) into pushed and held ones by front
+   * economics, then weights place territories by it: a pushed direction's factories and sea zones
+   * x2 in the land, sea and remaining-production place order, a held direction whose hold ratio is
+   * met x1/2. Only reorders; counts a hit when the order changes.
+   */
+  FLOW_ALLOCATOR,
+  /** Log only: prints the flow allocator's plan at each purchase to stdout. */
+  FLOW_LOG,
+  /**
+   * With FLOW_ALLOCATOR: land factories in a held direction buy a higher fodder share (+15 points),
+   * since defence buys more combat power per TUV.
+   */
+  FLOW_HOLD_MIX,
+  /** With FLOW_ALLOCATOR: the push weight is x4 instead of x2. */
+  FLOW_STRONG,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

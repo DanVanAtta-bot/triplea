@@ -62,6 +62,11 @@ public final class ProData {
   // DAN_* gates: each player's strike plan, kept for the game, and this turn's readings.
   private final Map<String, ProDanModel.Plan> danPlans = new HashMap<>();
   @Setter private @Nullable ProDanModel.Turn danTurn = null;
+
+  // FLOW_ALLOCATOR: this turn's direction plan, set at purchase.
+  @Setter
+  private @Nullable games.strategy.triplea.ai.pro.util.ProFlowAllocator.Plan flowPlan = null;
+
   // DAN_SUPPLY: hold estimates by territory name, for the current turn.
   private final Map<String, Double> danHoldCache = new HashMap<>();
 

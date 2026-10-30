@@ -21,6 +21,7 @@ import games.strategy.triplea.ai.pro.simulate.ProDummyDelegateBridge;
 import games.strategy.triplea.ai.pro.simulate.ProSimulateTurnUtils;
 import games.strategy.triplea.ai.pro.util.ProBattleUtils;
 import games.strategy.triplea.ai.pro.util.ProDanModel;
+import games.strategy.triplea.ai.pro.util.ProFlowAllocator;
 import games.strategy.triplea.ai.pro.util.ProMatches;
 import games.strategy.triplea.ai.pro.util.ProOddsCalculator;
 import games.strategy.triplea.ai.pro.util.ProOppPurchase;
@@ -79,6 +80,7 @@ public abstract class AbstractProAi extends AbstractAi {
   // STRAFE_CANT_HOLD: territory name -> rounds to fight before retreating
   private Map<String, Integer> storedStrafeRetreats = Map.of();
   private final ProOppPurchase oppPurchase = new ProOppPurchase();
+  private final ProFlowAllocator flowAllocator = new ProFlowAllocator();
 
   // Measurement only; never consulted by decision logic.
   @Getter @Setter @Nullable private ProDecisionListener decisionListener;
@@ -203,6 +205,18 @@ public abstract class AbstractProAi extends AbstractAi {
     }
     if (!purchaseForBid && proData.isPatchOn(ProAiPatch.OPP_PURCHASE_LOG)) {
       oppPurchase.run(data, player);
+    }
+    if (!purchaseForBid
+        && (proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR) || proData.hasPatch(ProAiPatch.FLOW_LOG))) {
+      final ProFlowAllocator.Plan plan =
+          flowAllocator.plan(
+              data, player, pusToSpend, proData.hasPatch(ProAiPatch.FLOW_STRONG) ? 4.0 : 2.0);
+      proData.setFlowPlan(plan);
+      if (proData.isPatchOn(ProAiPatch.FLOW_LOG)) {
+        System.out.printf(
+            "FLOW r%d %s pus=%d%s%n",
+            data.getSequence().getRound(), player.getName(), pusToSpend, plan);
+      }
     }
     if (pusToSpend <= 0) {
       return;
