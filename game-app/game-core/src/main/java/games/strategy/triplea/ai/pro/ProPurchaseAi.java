@@ -1720,6 +1720,15 @@ class ProPurchaseAi {
         // A held front: defence buys more combat power per TUV, so more cheap hit points
         fodderPercent = Math.min(90, fodderPercent + 15);
       }
+      if (flow != null
+          && proData.hasPatch(ProAiPatch.FLOW_ALLOCATOR)
+          && proData.hasPatch(ProAiPatch.FLOW_PUSH_MIX)
+          && flow.directionOf(t) != null
+          && flow.directionOf(t).mode() == ProFlowAllocator.Mode.PUSH
+          && proData.isPatchOn(ProAiPatch.FLOW_PUSH_MIX)) {
+        // A pushed front needs attack power
+        fodderPercent = Math.max(20, fodderPercent - 15);
+      }
       ProLogger.debug(t + ", enemyDistance=" + enemyDistance + ", fodderPercent=" + fodderPercent);
       final Set<Territory> neighbors =
           data.getMap().getNeighbors(t, 2, ProMatches.territoryCanMoveLandUnits(player, false));

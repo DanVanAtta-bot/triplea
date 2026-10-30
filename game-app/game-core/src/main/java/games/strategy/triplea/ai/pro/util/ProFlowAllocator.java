@@ -229,6 +229,8 @@ public final class ProFlowAllocator {
 
   static final double MOVE_PUSH = 1.5;
   static final double MOVE_HOLD = 0.8;
+  static final double MOVE_PUSH_STRONG = 2.0;
+  static final double MOVE_HOLD_STRONG = 0.6;
 
   /**
    * FLOW_MOVE: weight on a territory's value in attack and move values, by the flow plan: in a
@@ -239,11 +241,13 @@ public final class ProFlowAllocator {
     if (plan == null || !proData.hasPatch(ProAiPatch.FLOW_MOVE)) {
       return 1;
     }
+    final boolean strong = proData.hasPatch(ProAiPatch.FLOW_MOVE_STRONG);
     final double f;
     if (plan.pushedCorridorOf(t) != null) {
-      f = MOVE_PUSH;
-    } else if (plan.heldCorridorOf(t) != null) {
-      f = MOVE_HOLD;
+      f = strong ? MOVE_PUSH_STRONG : MOVE_PUSH;
+    } else if (!proData.hasPatch(ProAiPatch.FLOW_MOVE_PUSH_ONLY)
+        && plan.heldCorridorOf(t) != null) {
+      f = strong ? MOVE_HOLD_STRONG : MOVE_HOLD;
     } else {
       return 1;
     }

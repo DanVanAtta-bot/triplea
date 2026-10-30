@@ -278,6 +278,11 @@ public enum ProAiPatch {
    * since defence buys more combat power per TUV.
    */
   FLOW_HOLD_MIX,
+  /**
+   * With FLOW_ALLOCATOR: land factories in a pushed direction buy a lower fodder share (-15 points,
+   * at least 20%), for attack power.
+   */
+  FLOW_PUSH_MIX,
   /** With FLOW_ALLOCATOR: the push weight is x4 instead of x2. */
   FLOW_STRONG,
   /**
@@ -287,6 +292,10 @@ public enum ProAiPatch {
    * at purchase with FLOW_ALLOCATOR or FLOW_LOG on.
    */
   FLOW_MOVE,
+  /** With FLOW_MOVE: x2.0 in pushed corridors and x0.6 in held ones. */
+  FLOW_MOVE_STRONG,
+  /** With FLOW_MOVE: only the pushed corridors' weight; held corridors stay x1. */
+  FLOW_MOVE_PUSH_ONLY,
   /**
    * With FLOW_ALLOCATOR, while some direction is pushed: the land buy skips factories of held
    * directions whose hold ratio is already met (their defenders are bought before it), leaving the
