@@ -255,6 +255,20 @@ public enum ProAiPatch {
    * production, so a 0-PU island that completes a 5-PU objective is worth nothing.
    */
   NO_VALUE,
+  /**
+   * After the combat move has assigned units to every attack, makes the land attacks the enemy's
+   * counter-attack retakes (trades, judged on the units actually assigned) cheaper: one unit at a
+   * time, the costliest ground unit in a trade is dropped, replaced by a cheaper unused land unit
+   * or an unused aircraft that can land safely, or swapped with a cheaper land unit from another
+   * attack (which gets the costlier unit, or nothing), while the trade's capture chance (air-only
+   * wins don't capture) stays within {@code ProCombatMoveAi.TRADE_REASSIGN_SLACK} points of plan
+   * and the other attack keeps its odds and its hold. Each step must raise the summed value (TUV
+   * swing plus territory worth times capture chance, minus 2/3 of the counter-attack's swing on the
+   * land units left there). Stock fills trades greedily attack by attack, so the cheap units are
+   * already committed elsewhere and trades keep tanks and artillery the counter-attack kills;
+   * landings fill the whole transport. Counts a hit per change.
+   */
+  TRADE_REASSIGN,
   ;
 
   /** AI-1: Dan's strategy model with every component on. */

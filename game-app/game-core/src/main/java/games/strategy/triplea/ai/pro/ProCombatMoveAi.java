@@ -149,6 +149,9 @@ public class ProCombatMoveAi {
       readdRemovedAmphibAttacks(
           attackOptions, beforeWorthCheck, removedBySelection, alreadyMovedUnits);
     }
+    if (proData.hasPatch(ProAiPatch.TRADE_REASSIGN)) {
+      new TradeReassigner(attackOptions, alreadyMovedUnits).run();
+    }
 
     // Get all transport final territories
     ProMoveUtils.calculateAmphibRoutes(
@@ -1721,6 +1724,415 @@ public class ProCombatMoveAi {
             ? ProUtils.getPlayerProduction(t.getOwner(), data)
             : 0;
     return (2 + isFactory) * TerritoryAttachment.getProduction(t) + capitalValue;
+  }
+
+  /** TRADE_REASSIGN: a trade's capture chance may drop this many points below its plan. */
+  static final double TRADE_REASSIGN_SLACK = 10;
+
+  /** TRADE_REASSIGN: an attack giving up a unit may lose this many points of win chance. */
+  static final double TRADE_REASSIGN_DONOR_SLACK = 3;
+
+  /** TRADE_REASSIGN: value a change must gain (calculator noise). */
+  static final double TRADE_REASSIGN_MIN_GAIN = 0.5;
+
+  /** TRADE_REASSIGN: trial attacks per combat move (calculator budget). */
+  static final int TRADE_REASSIGN_BUDGET = 240;
+
+  /** TRADE_REASSIGN: changes per trade. */
+  static final int TRADE_REASSIGN_MAX_STEPS = 6;
+
+  /**
+   * TRADE_REASSIGN: an attack's units judged as a capture: chance to take it with a land unit (the
+   * attack retreats when only air is left), the land units left there, whether the counter-attack
+   * retakes them, and value = TUV swing + worth x capture chance - {@link #TRADE_COUNTER_WEIGHT} x
+   * the counter-attack's swing.
+   */
+  private record Capture(
+      List<Unit> units, double chance, boolean land, boolean trade, double value) {
+    double groundTuv(final ProData proData) {
+      return units.stream()
+          .filter(Matches.unitIsLand())
+          .mapToDouble(u -> proData.getUnitValue(u.getType()))
+          .sum();
+    }
+  }
+
+  /** TRADE_REASSIGN: one change: the trade's new units, and the other attack's (or null). */
+  private record Reassignment(
+      List<Unit> tradeUnits,
+      @Nullable ProTerritory other,
+      @Nullable List<Unit> otherUnits,
+      Capture trade,
+      @Nullable Capture otherCapture,
+      double gain,
+      String what) {}
+
+  /** TRADE_REASSIGN: makes can't-hold land attacks cheaper once every attack has its units. */
+  private final class TradeReassigner {
+    private final List<ProTerritory> attacks;
+    private final Map<Unit, Set<Territory>> unitMoveMap;
+    private final List<Unit> free = new ArrayList<>();
+    private final Map<ProTerritory, Capture> captures = new HashMap<>();
+    private int budget = TRADE_REASSIGN_BUDGET;
+
+    TradeReassigner(final List<ProTerritory> prioritized, final List<Unit> alreadyMovedUnits) {
+      unitMoveMap = territoryManager.getAttackOptions().getUnitMoveMap();
+      final Set<Unit> used = new HashSet<>(alreadyMovedUnits);
+      for (final ProTerritory patd :
+          territoryManager.getAttackOptions().getTerritoryMap().values()) {
+        used.addAll(patd.getUnits());
+        used.addAll(patd.getBombers());
+        used.addAll(patd.getAmphibAttackMap().keySet());
+        patd.getAmphibAttackMap().values().forEach(used::addAll);
+        used.addAll(patd.getBombardTerritoryMap().keySet());
+      }
+      for (final Unit u : unitMoveMap.keySet()) {
+        if (!used.contains(u) && !Matches.unitIsSea().test(u) && isPlainUnit(u)) {
+          free.add(u);
+        }
+      }
+      free.sort(Comparator.comparingDouble(u -> proData.getUnitValue(u.getType())));
+      attacks =
+          prioritized.stream()
+              .filter(p -> !p.getTerritory().isWater() && !p.getUnits().isEmpty())
+              .filter(p -> !p.isStrafing())
+              .collect(Collectors.toList());
+    }
+
+    void run() {
+      for (final ProTerritory patd : attacks) {
+        captures.put(patd, capture(patd, patd.getUnits()));
+      }
+      final List<ProTerritory> trades =
+          attacks.stream()
+              .filter(p -> captures.get(p).trade() && p.getBombardTerritoryMap().isEmpty())
+              .sorted(
+                  Comparator.comparingDouble(
+                          (ProTerritory p) -> -captures.get(p).groundTuv(proData))
+                      .thenComparing(p -> p.getTerritory().getName()))
+              .collect(Collectors.toList());
+      for (final ProTerritory trade : trades) {
+        final Capture planned = captures.get(trade);
+        final double floor =
+            Math.max(
+                proData.getMinWinPercentage(),
+                Math.min(planned.chance(), proData.getWinPercentage()) - TRADE_REASSIGN_SLACK);
+        for (int step = 0; step < TRADE_REASSIGN_MAX_STEPS && budget > 0; step++) {
+          final Reassignment best = bestReassignment(trade, floor);
+          if (best == null) {
+            break;
+          }
+          apply(trade, best);
+        }
+      }
+    }
+
+    /** Land and air units that move alone (not land transports or the units they carry). */
+    private boolean isPlainUnit(final Unit u) {
+      return !Matches.unitIsLandTransport().test(u)
+          && !Matches.unitIsSea().test(u)
+          && ProTransportUtils.getUnitsToAdd(
+                  proData, u, territoryManager.getAttackOptions().getTerritoryMap())
+              .equals(List.of(u));
+    }
+
+    private double cost(final Unit u) {
+      return proData.getUnitValue(u.getType());
+    }
+
+    private boolean canReach(final Unit u, final ProTerritory patd) {
+      final Set<Territory> options = unitMoveMap.get(u);
+      return options != null && options.contains(patd.getTerritory());
+    }
+
+    @Nullable
+    private Unit transportOf(final ProTerritory patd, final Unit u) {
+      for (final Map.Entry<Unit, List<Unit>> e : patd.getAmphibAttackMap().entrySet()) {
+        if (e.getValue().contains(u)) {
+          return e.getKey();
+        }
+      }
+      return null;
+    }
+
+    /** One unit per type and starting territory: the others give the same battle. */
+    private List<Unit> distinct(final Collection<Unit> units) {
+      final Map<String, Unit> byKey = new TreeMap<>();
+      for (final Unit u : units) {
+        byKey.putIfAbsent(
+            u.getType().getName() + "@" + proData.getUnitTerritory(u).getName() + "#" + u.getHits(),
+            u);
+      }
+      return new ArrayList<>(byKey.values());
+    }
+
+    @Nullable
+    private Reassignment bestReassignment(final ProTerritory trade, final double floor) {
+      final Capture current = captures.get(trade);
+      final Territory t = trade.getTerritory();
+      final List<Unit> defenders = trade.getMaxEnemyDefenders(player);
+      final boolean airWelcome =
+          defenders.stream().anyMatch(ProMatches.unitIsEnemyAndNotInfa(player))
+              && defenders.stream().noneMatch(Matches.unitIsAaForAnything());
+      final List<Unit> ground =
+          distinct(
+              CollectionUtils.getMatches(
+                  trade.getUnits(), u -> Matches.unitIsLand().test(u) && isPlainUnitInAttack(u)));
+      ground.sort(Comparator.comparingDouble((Unit u) -> -cost(u)));
+      final List<Unit> freeKinds = distinct(free);
+      Reassignment best = null;
+      for (final Unit x : ground) {
+        if (budget <= 0) {
+          break;
+        }
+        final Unit transport = transportOf(trade, x);
+        if (transport != null && trade.getAmphibAttackMap().get(transport).size() < 2) {
+          continue; // a landing keeps at least one unit per transport
+        }
+        final List<Unit> without = new ArrayList<>(trade.getUnits());
+        without.remove(x);
+        best =
+            better(best, tryTrade(trade, floor, current, without, "drop " + x.getType().getName()));
+        // cheaper unused land units, and unused aircraft that can land
+        final List<Unit> candidates = new ArrayList<>();
+        for (final Unit y : freeKinds) {
+          if (!canReach(y, trade)) {
+            continue;
+          }
+          if (Matches.unitIsLand().test(y) ? cost(y) < cost(x) : airWelcome && isSafeAir(y, t)) {
+            candidates.add(y);
+          }
+        }
+        for (final Unit y : candidates) {
+          final List<Unit> swapped = new ArrayList<>(without);
+          swapped.add(y);
+          best =
+              better(
+                  best,
+                  tryTrade(
+                      trade,
+                      floor,
+                      current,
+                      swapped,
+                      x.getType().getName() + " -> unused " + y.getType().getName()));
+        }
+        // cheaper land units from other attacks
+        for (final ProTerritory other : attacks) {
+          if (other == trade || budget <= 0) {
+            continue;
+          }
+          final List<Unit> donors =
+              distinct(
+                  CollectionUtils.getMatches(
+                      other.getUnits(),
+                      y ->
+                          Matches.unitIsLand().test(y)
+                              && cost(y) < cost(x)
+                              && canReach(y, trade)
+                              && transportOf(other, y) == null
+                              && isPlainUnitInAttack(y)));
+          for (final Unit y : donors) {
+            final List<Unit> swapped = new ArrayList<>(without);
+            swapped.add(y);
+            final List<Unit> otherLess = new ArrayList<>(other.getUnits());
+            otherLess.remove(y);
+            best =
+                better(
+                    best,
+                    tryDonor(
+                        trade,
+                        floor,
+                        current,
+                        swapped,
+                        other,
+                        otherLess,
+                        x.getType().getName()
+                            + " <- "
+                            + y.getType().getName()
+                            + " from "
+                            + other.getTerritory().getName()));
+            if (transport == null && canReach(x, other)) {
+              final List<Unit> otherSwapped = new ArrayList<>(otherLess);
+              otherSwapped.add(x);
+              best =
+                  better(
+                      best,
+                      tryDonor(
+                          trade,
+                          floor,
+                          current,
+                          swapped,
+                          other,
+                          otherSwapped,
+                          x.getType().getName()
+                              + " <-> "
+                              + y.getType().getName()
+                              + " with "
+                              + other.getTerritory().getName()));
+            }
+          }
+        }
+      }
+      return best == null || best.gain() < TRADE_REASSIGN_MIN_GAIN ? null : best;
+    }
+
+    /** Land transports stay: the units they carry may not reach on their own. */
+    private boolean isPlainUnitInAttack(final Unit u) {
+      return !Matches.unitIsLandTransport().test(u);
+    }
+
+    private boolean isSafeAir(final Unit u, final Territory t) {
+      return Matches.unitIsAir().test(u) && canAirSafelyLandAfterAttack(u, t);
+    }
+
+    @Nullable
+    private Reassignment better(@Nullable final Reassignment a, @Nullable final Reassignment b) {
+      if (b == null) {
+        return a;
+      }
+      return a == null || b.gain() > a.gain() ? b : a;
+    }
+
+    @Nullable
+    private Reassignment tryTrade(
+        final ProTerritory trade,
+        final double floor,
+        final Capture current,
+        final List<Unit> units,
+        final String what) {
+      if (budget <= 0) {
+        return null;
+      }
+      final Capture next = capture(trade, units);
+      if (!next.land() || next.chance() < floor) {
+        return null;
+      }
+      return new Reassignment(units, null, null, next, null, next.value() - current.value(), what);
+    }
+
+    @Nullable
+    private Reassignment tryDonor(
+        final ProTerritory trade,
+        final double floor,
+        final Capture current,
+        final List<Unit> units,
+        final ProTerritory other,
+        final List<Unit> otherUnits,
+        final String what) {
+      final Reassignment tradeSide = tryTrade(trade, floor, current, units, what);
+      if (tradeSide == null || budget <= 0) {
+        return null;
+      }
+      final Capture otherNow = captures.get(other);
+      final Capture otherNext = capture(other, otherUnits);
+      final double otherFloor =
+          Math.max(
+              proData.getMinWinPercentage(),
+              Math.min(otherNow.chance(), proData.getWinPercentage()) - TRADE_REASSIGN_DONOR_SLACK);
+      if (!otherNext.land()
+          || otherNext.chance() < otherFloor
+          || (otherNext.trade() && !otherNow.trade())) {
+        return null;
+      }
+      return new Reassignment(
+          units,
+          other,
+          otherUnits,
+          tradeSide.trade(),
+          otherNext,
+          tradeSide.gain() + otherNext.value() - otherNow.value(),
+          what);
+    }
+
+    private void apply(final ProTerritory trade, final Reassignment r) {
+      ProLogger.debug(
+          "TRADE_REASSIGN: "
+              + trade.getTerritory().getName()
+              + " "
+              + r.what()
+              + ", gain="
+              + r.gain()
+              + ", capture="
+              + captures.get(trade).chance()
+              + " -> "
+              + r.trade().chance()
+              + ", ground TUV="
+              + captures.get(trade).groundTuv(proData)
+              + " -> "
+              + r.trade().groundTuv(proData));
+      if (!proData.isPatchOn(ProAiPatch.TRADE_REASSIGN)) {
+        return;
+      }
+      final Set<Unit> before = new HashSet<>(trade.getUnits());
+      if (r.other() != null) {
+        before.addAll(r.other().getUnits());
+        setUnits(r.other(), r.otherUnits());
+        captures.put(r.other(), r.otherCapture());
+      }
+      setUnits(trade, r.tradeUnits());
+      captures.put(trade, r.trade());
+      final Set<Unit> after = new HashSet<>(r.tradeUnits());
+      if (r.other() != null) {
+        after.addAll(r.otherUnits());
+      }
+      free.removeAll(after);
+      for (final Unit u : before) {
+        if (!after.contains(u) && unitMoveMap.containsKey(u) && isPlainUnit(u)) {
+          free.add(u);
+        }
+      }
+      free.sort(Comparator.comparingDouble(u -> proData.getUnitValue(u.getType())));
+    }
+
+    /** Replaces an attack's units, dropping removed landing units from their transports. */
+    private void setUnits(final ProTerritory patd, final List<Unit> units) {
+      for (final Map.Entry<Unit, List<Unit>> e : patd.getAmphibAttackMap().entrySet()) {
+        final List<Unit> kept = new ArrayList<>(e.getValue());
+        kept.retainAll(units);
+        e.setValue(kept);
+      }
+      patd.getUnits().clear();
+      patd.getUnits().addAll(units);
+      patd.setBattleResult(null);
+    }
+
+    private Capture capture(final ProTerritory patd, final List<Unit> attackers) {
+      budget--;
+      final Territory t = patd.getTerritory();
+      final List<Unit> defenders = patd.getMaxEnemyDefenders(player);
+      final Collection<Unit> bombard = patd.getBombardTerritoryMap().keySet();
+      final ProBattleResult result;
+      if (defenders.stream().noneMatch(Matches.unitIsNotInfrastructure())
+          || ProBattleUtils.estimateStrengthDifference(t, attackers, defenders) < 45) {
+        result = calc.estimateAttackBattleResults(proData, t, attackers, defenders, bombard);
+      } else {
+        result = calc.callBattleCalcWithRetreatAir(proData, t, attackers, defenders, bombard);
+      }
+      final List<Unit> leftThere =
+          CollectionUtils.getMatches(result.getAverageAttackersRemaining(), Matches.unitIsLand());
+      final ProBattleResult counter =
+          leftThere.isEmpty() || patd.getMaxEnemyUnits().isEmpty()
+              ? null
+              : calc.calculateBattleResults(
+                  proData, t, patd.getMaxEnemyUnits(), leftThere, patd.getMaxEnemyBombardUnits());
+      final boolean trade = counter != null && !canHoldAgainstCounterAttack(t, counter);
+      final double worth =
+          tradedTerritoryWorth(t)
+              + (trade
+                  ? 0
+                  : TerritoryAttachment.getProduction(t)
+                      * (1 + (ProMatches.territoryHasInfraFactoryAndIsLand().test(t) ? 1.5 : 0)));
+      final double counterSwing =
+          counter == null ? 0 : TRADE_COUNTER_WEIGHT * Math.max(0, counter.getTuvSwing());
+      final double value =
+          result.getTuvSwing() + worth * result.getWinPercentage() / 100 - counterSwing;
+      return new Capture(
+          List.copyOf(attackers),
+          result.getWinPercentage(),
+          result.isHasLandUnitRemaining(),
+          trade,
+          value);
+    }
   }
 
   private void determineTerritoriesThatCanBeBombed(
